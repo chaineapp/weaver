@@ -1,7 +1,7 @@
 import { startMcpServer } from "@weaver/mcp-orchestrator";
 
 export async function runMcp(): Promise<void> {
-  // projectRoot is the cwd where Claude Code invoked `weave mcp`, which for a
-  // project-scoped .mcp.json is the project root.
-  await startMcpServer({ projectRoot: process.cwd() });
+  // The server's cwd is whatever Claude Code launched us in — i.e. the planner's
+  // project root for project-scoped use, or anywhere for user-scoped use.
+  await startMcpServer({ serverCwd: process.cwd() });
 }

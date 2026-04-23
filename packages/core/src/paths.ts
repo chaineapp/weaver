@@ -1,43 +1,40 @@
 import { join } from "node:path";
+import { homedir } from "node:os";
 
-// File-system layout of a Weaver-initialized project:
-//
-//   <projectRoot>/
-//     .mcp.json                 (written by `weave init`, points at `weave mcp`)
-//     .weave/
-//       config.json             project-level config
-//       panes.json               pane registry (v1 — simple JSON, not SQLite)
-//       runs/<pane_id>.jsonl     per-pane JSONL transcripts (tee'd via tmux pipe-pane)
-//       memory/                  seed playbooks + (later) auto-extract output
+function resolveHome(): string {
+  // process.env.HOME honors test isolation; homedir() is the fallback when HOME is unset.
+  return process.env.HOME ?? homedir();
+}
+
+// Weaver state is global: ~/.weave/ holds the projects registry, pane registry,
+// all run-file transcripts, and seed memory. Repos and worktrees never have
+// Weaver files inside them — you can run `weave up --path <any-dir>` and it
+// auto-registers.
 
 export type WeavePaths = {
-  root: string;
-  mcpJson: string;
-  weaveDir: string;
-  config: string;
-  panes: string;
-  runsDir: string;
+  weaveHome: string;                 // ~/.weave
+  config: string;                    // ~/.weave/config.json
+  projects: string;                  // ~/.weave/projects.json
+  panes: string;                     // ~/.weave/panes.json
+  runsDir: string;                   // ~/.weave/runs/
   runFile: (paneId: string) => string;
-  memoryDir: string;
+  memoryDir: string;                 // ~/.weave/memory/
 };
 
-export function paths(projectRoot: string): WeavePaths {
-  const weaveDir = join(projectRoot, ".weave");
-  const runsDir = join(weaveDir, "runs");
+export function weavePaths(): WeavePaths {
+  const weaveHome = join(resolveHome(), ".weave");
+  const runsDir = join(weaveHome, "runs");
   return {
-    root: projectRoot,
-    mcpJson: join(projectRoot, ".mcp.json"),
-    weaveDir,
-    config: join(weaveDir, "config.json"),
-    panes: join(weaveDir, "panes.json"),
+    weaveHome,
+    config: join(weaveHome, "config.json"),
+    projects: join(weaveHome, "projects.json"),
+    panes: join(weaveHome, "panes.json"),
     runsDir,
     runFile: (paneId: string) => join(runsDir, `${sanitizePaneId(paneId)}.jsonl`),
-    memoryDir: join(weaveDir, "memory"),
+    memoryDir: join(weaveHome, "memory"),
   };
 }
 
-// tmux pane ids start with `%` which is a safe filename char, but keep this
-// tight in case we expand pane identification later.
 function sanitizePaneId(paneId: string): string {
   return paneId.replace(/[^A-Za-z0-9_%-]/g, "_");
 }

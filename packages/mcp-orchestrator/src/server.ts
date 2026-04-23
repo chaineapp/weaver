@@ -1,7 +1,3 @@
-// MCP stdio server. Exposes Weaver's orchestration surface to any MCP client
-// (primarily the planner Claude session). Self-contained: reads `.weave/` files
-// and drives `tmux` directly, no daemon in v1.
-
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
@@ -13,62 +9,79 @@ import {
   SendToPaneInput,
   KillPaneInput,
   PaneSummaryInput,
+  ListProjectsInput,
+  WaitForUpdatesInput,
   spawnPane,
-  listPanes,
+  listPanesTool,
   getPaneOutput,
   sendToPane,
   killPaneTool,
   paneSummaryTool,
+  listProjectsTool,
+  waitForUpdatesTool,
 } from "./tools.ts";
 
 const TOOLS = [
   {
     name: "spawn_pane",
     description:
-      "Spawn a new Codex worker in a tmux pane under the current Weaver project. Returns the pane id the planner can use to monitor and drive it.",
+      "Spawn a new Codex worker in a tmux pane. Project+worktree are auto-resolved from cwd (defaults to planner's cwd). The pane's stdout is captured to ~/.weave/runs/<pane>.jsonl — you read it via get_pane_output.",
     inputSchema: SpawnPaneInput,
     handler: spawnPane,
   },
   {
     name: "list_panes",
     description:
-      "List all Codex worker panes in the current project with status, task, and recent activity.",
+      "List Codex worker panes. No filter returns all panes across all projects and worktrees. Shows status, task, last command/file/message, review cursor.",
     inputSchema: ListPanesInput,
-    handler: listPanes,
+    handler: listPanesTool,
   },
   {
     name: "get_pane_output",
     description:
-      "Read structured JSONL events emitted by a Codex worker pane. Supports incremental reads via since_byte.",
+      "Read new JSONL events from a worker pane and auto-advance the review cursor. Subsequent calls return only events you haven't seen. Pass from_start=true to replay everything.",
     inputSchema: GetPaneOutputInput,
     handler: getPaneOutput,
   },
   {
     name: "send_to_pane",
-    description: "Inject input (followed by Enter) into a Codex worker pane via tmux send-keys.",
+    description: "Inject input (plus Enter) into a worker pane via tmux send-keys.",
     inputSchema: SendToPaneInput,
     handler: sendToPane,
   },
   {
     name: "kill_pane",
-    description: "Terminate a Codex worker pane and remove it from the registry.",
+    description: "Terminate a worker pane and remove it from the registry.",
     inputSchema: KillPaneInput,
     handler: killPaneTool,
   },
   {
     name: "pane_summary",
     description:
-      "Return a cheap, no-LLM summary of a pane's state: status, turns, last command/file/message, token totals, error count.",
+      "Return a cheap, no-LLM summary of a pane: status, turns, last command/file/message, token totals, error count.",
     inputSchema: PaneSummaryInput,
     handler: paneSummaryTool,
+  },
+  {
+    name: "list_projects",
+    description: "List all projects and their worktrees that Weaver has registered.",
+    inputSchema: ListProjectsInput,
+    handler: listProjectsTool,
+  },
+  {
+    name: "wait_for_updates",
+    description:
+      "Block until any pane emits new JSONL events past its review cursor, or the timeout fires. Returns the list of changed panes with byte deltas. THIS IS THE PLANNER'S AUTO-LOOP PRIMITIVE — call it after spawn_pane and again after each read, so workers' results flow back without the user re-prompting.",
+    inputSchema: WaitForUpdatesInput,
+    handler: waitForUpdatesTool,
   },
 ] as const;
 
 type ToolDef = (typeof TOOLS)[number];
 
-export async function startMcpServer(opts: { projectRoot: string }): Promise<void> {
+export async function startMcpServer(opts: { serverCwd: string }): Promise<void> {
   const server = new Server(
-    { name: "weaver", version: "0.1.0" },
+    { name: "weaver", version: "0.2.0" },
     { capabilities: { tools: {} } },
   );
 
@@ -90,10 +103,8 @@ export async function startMcpServer(opts: { projectRoot: string }): Promise<voi
     }
     try {
       const parsed = tool.inputSchema.parse(req.params.arguments ?? {});
-      // The tool handlers are narrowly typed per tool; the dispatch layer erases
-      // that relationship, so we cast here.
-      const result = await (tool.handler as (root: string, input: unknown) => Promise<unknown>)(
-        opts.projectRoot,
+      const result = await (tool.handler as (cwd: string, input: unknown) => Promise<unknown>)(
+        opts.serverCwd,
         parsed,
       );
       return {

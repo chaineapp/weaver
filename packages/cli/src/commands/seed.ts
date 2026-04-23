@@ -1,10 +1,6 @@
 import { join } from "node:path";
 import { mkdir } from "node:fs/promises";
 
-// P1.5 — seed playbooks. These ship with every `weave init` and are available
-// to the planner via the MCP memory tools (when P3 lands) and as files in the
-// project. Written only if not already present, so users can edit them freely.
-
 const SEEDS: Array<{ path: string; content: string }> = [
   {
     path: "patterns/plan-then-ticket.md",
@@ -24,7 +20,7 @@ Before writing code for a non-trivial task:
    - Small change → one issue.
 4. Only then begin implementation. Every PR links the ticket.
 
-**Why:** keeps work discoverable for the team, prevents duplicate effort, makes progress legible to stakeholders.
+**Why:** keeps work discoverable, prevents duplicate effort, makes progress legible to stakeholders.
 `,
   },
   {
@@ -41,12 +37,12 @@ After pushing a branch and opening a PR, run this loop (minimum 5 iterations or 
 1. Wait 15–20 minutes for reviewers + CI.
 2. Check PR comments: \`gh pr view --comments\`. Check CI: \`gh run list --log-failed\`.
 3. For every review comment:
-   - If the feedback is actionable and fixed: reply on GitHub with what changed, mark the thread resolved.
+   - If actionable and fixed: reply on GitHub with what changed, mark the thread resolved.
    - If it needs more discussion: reply with reasoning, leave unresolved.
 4. Fix CI failures.
 5. Push. Goto 1.
 
-**Why:** reviewers expect acknowledgement on every comment — silent resolution feels dismissive. CI catches what reviewers miss.
+**Why:** reviewers expect acknowledgement — silent resolution feels dismissive. CI catches what reviewers miss.
 `,
   },
   {
@@ -60,23 +56,53 @@ tags: [workflow, pr, branching]
 
 Prefer PRs that target \`main\` directly and land independently. Avoid feature-branch-off-feature-branch stacking.
 
-**Why:** stacked branches force reviewers to hold context across multiple PRs and make rebases painful when any middle PR changes. Independent small PRs merge as they're reviewed and keep the graph linear.
+**Why:** stacked branches force reviewers to hold context across multiple PRs and make rebases painful.
 
-**When stacking is OK:** the second branch genuinely depends on unmerged code in the first AND the first is ready to merge within hours, not days.
+**When stacking is OK:** the second branch genuinely depends on unmerged code in the first AND the first is ready to merge within hours.
+`,
+  },
+  {
+    path: "patterns/parallel-dispatch.md",
+    content: `---
+name: Parallel dispatch with auto-loop
+status: canonical
+source: seed
+tags: [workflow, codex, mcp, orchestration]
+---
+
+When a task breaks into 2+ independent sub-tasks, don't do them serially. Use Weaver's MCP tools to run them in parallel and auto-collect results.
+
+**Playbook (you, the planner Claude):**
+
+1. Break the task into sub-tasks. Before spawning, state the breakdown and the proposed parallelism count to the user and ask if they want to adjust.
+2. For each sub-task, call \`spawn_pane({ task: "<precise one-line prompt>" })\`. Codex runs in a tmux pane; output streams to \`~/.weave/runs/<pane>.jsonl\`.
+3. Enter the auto-loop:
+   - Call \`wait_for_updates({ timeout_seconds: 30 })\`.
+   - For each pane in the result, call \`get_pane_output({ pane_id })\` (auto-advances the review cursor).
+   - Digest the new events. If a pane hit \`turn.completed\` or \`turn.failed\`, summarize back to the user.
+   - If you need clarification from the user before continuing, stop and ask. Don't speculate.
+   - Otherwise, go back to \`wait_for_updates\`. Repeat until all panes are terminal.
+4. Keep the user informed proactively — after each completed pane, a one-paragraph summary of what changed and what's next. Don't wait for them to ask.
+5. If a pane fails or gets stuck, either \`send_to_pane\` to unstick it, \`kill_pane\` and re-\`spawn_pane\` with a revised prompt, or bring the question to the user.
+
+**Do not** re-spawn the same task in parallel (idempotency is task-driven). **Do not** poll every tool call — use \`wait_for_updates\` so you only wake when something happened.
+
+**Why:** the user's time is the bottleneck. Weaver is specifically built to remove the copy-paste loop. Act like N Codex workers are silently running in the background — because they are.
 `,
   },
   {
     path: "INDEX.md",
     content: `# Memory index
 
-Seed playbooks auto-written by \`weave init\`. Extend freely — add your own architectural decisions, service docs, runbooks. The planner Claude can read these via the MCP memory tools (P3 of the Weaver plan).
+Seed playbooks written by \`weave init\`. Extend freely.
 
 ## Patterns
-- [plan-then-ticket](patterns/plan-then-ticket.md) — plan first, check/create Linear tickets, then code
-- [small-independent-prs](patterns/small-independent-prs.md) — prefer small PRs targeting main over stacked branches
+- [plan-then-ticket](patterns/plan-then-ticket.md)
+- [parallel-dispatch](patterns/parallel-dispatch.md) — THE auto-loop playbook. Read first.
+- [small-independent-prs](patterns/small-independent-prs.md)
 
 ## Runbooks
-- [pr-shepherd-loop](runbooks/pr-shepherd-loop.md) — after push, wait 15-20min, check comments + CI, reply on every thread, push fixes, loop
+- [pr-shepherd-loop](runbooks/pr-shepherd-loop.md)
 `,
   },
 ];
@@ -88,7 +114,7 @@ export async function writeSeedPlaybooks(memoryDir: string): Promise<void> {
     const dir = full.substring(0, full.lastIndexOf("/"));
     await mkdir(dir, { recursive: true });
     const file = Bun.file(full);
-    if (await file.exists()) continue; // never overwrite user edits
+    if (await file.exists()) continue;
     await Bun.write(full, seed.content);
   }
 }

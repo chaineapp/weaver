@@ -1,23 +1,19 @@
-import { paths } from "./paths.ts";
+import { weavePaths } from "./paths.ts";
 import { parseAll, summarize, type CodexEvent, type PaneSummary } from "@weaver/codex-adapter";
 
 export type ReadEventsOptions = {
-  sinceByte?: number; // start reading at this byte offset
-  maxEvents?: number; // cap on events returned
+  sinceByte?: number;
+  maxEvents?: number;
 };
 
 export type ReadEventsResult = {
   events: CodexEvent[];
-  endByte: number; // next offset to read from
+  endByte: number;
   fileMissing: boolean;
 };
 
-export async function readEvents(
-  projectRoot: string,
-  paneId: string,
-  opts: ReadEventsOptions = {},
-): Promise<ReadEventsResult> {
-  const runFile = paths(projectRoot).runFile(paneId);
+export async function readEvents(paneId: string, opts: ReadEventsOptions = {}): Promise<ReadEventsResult> {
+  const runFile = weavePaths().runFile(paneId);
   const file = Bun.file(runFile);
   if (!(await file.exists())) {
     return { events: [], endByte: 0, fileMissing: true };
@@ -26,7 +22,6 @@ export async function readEvents(
   const start = opts.sinceByte ?? 0;
   if (start >= size) return { events: [], endByte: size, fileMissing: false };
 
-  // Bun.file supports slice for range reads without loading whole file.
   const slice = file.slice(start, size);
   const text = await slice.text();
   const events = parseAll(text);
@@ -34,7 +29,13 @@ export async function readEvents(
   return { events: capped, endByte: size, fileMissing: false };
 }
 
-export async function paneSummary(projectRoot: string, paneId: string): Promise<PaneSummary> {
-  const { events } = await readEvents(projectRoot, paneId);
+export async function paneSummary(paneId: string): Promise<PaneSummary> {
+  const { events } = await readEvents(paneId);
   return summarize(events);
+}
+
+export async function runFileSize(paneId: string): Promise<number> {
+  const file = Bun.file(weavePaths().runFile(paneId));
+  if (!(await file.exists())) return 0;
+  return file.size;
 }

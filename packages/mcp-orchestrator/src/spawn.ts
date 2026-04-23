@@ -1,52 +1,50 @@
-// Spawn a Codex worker into a new tmux pane and pipe its JSONL output to
-// .weave/runs/<pane>.jsonl. Called by the `spawn_pane` MCP tool.
-
 import { splitPane, sendKeys, pipePane, newSession, hasSession } from "@weaver/tmux";
-import { paths, upsertPaneRecord, type PaneRecord, readConfig } from "@weaver/core";
+import {
+  weavePaths,
+  upsertPaneRecord,
+  resolveOrRegister,
+  type PaneRecord,
+} from "@weaver/core";
 
 export type SpawnOptions = {
-  projectRoot: string;
   task: string;
+  cwd: string;              // working directory the worker runs in (a project root or worktree)
   model?: string;
 };
 
 export async function spawnWorker(opts: SpawnOptions): Promise<PaneRecord> {
-  const config = await readConfig(opts.projectRoot);
-  if (!config) throw new Error(`${opts.projectRoot} is not a weaver project — run \`weave init\` first`);
+  const { project, worktree } = await resolveOrRegister(opts.cwd);
 
-  // Ensure the tmux session exists.
-  if (!(await hasSession(config.tmuxSession))) {
-    await newSession({ name: config.tmuxSession, cwd: opts.projectRoot });
+  if (!(await hasSession(worktree.tmuxSession))) {
+    await newSession({ name: worktree.tmuxSession, cwd: worktree.path });
   }
 
-  // Split the last pane of the session to create a new worker pane.
   const paneId = await splitPane({
-    target: config.tmuxSession,
+    target: worktree.tmuxSession,
     direction: "vertical",
-    cwd: opts.projectRoot,
+    cwd: worktree.path,
   });
 
-  // Begin teeing pane output to the run file BEFORE sending any input.
-  const runFile = paths(opts.projectRoot).runFile(paneId);
+  const runFile = weavePaths().runFile(paneId);
   await pipePane(paneId, runFile);
 
-  // Launch Codex in non-interactive JSON mode.
-  const codexCmd = buildCodexCommand(opts.task, opts.model);
-  await sendKeys(paneId, codexCmd);
+  await sendKeys(paneId, buildCodexCommand(opts.task, opts.model));
 
   const now = new Date().toISOString();
   const record: PaneRecord = {
     id: paneId,
+    projectId: project.id,
+    worktreeId: worktree.id,
     task: opts.task,
     model: opts.model,
     status: "running",
-    tmuxSession: config.tmuxSession,
-    tmuxPane: paneId,
+    tmuxSession: worktree.tmuxSession,
     runFile,
+    lastReviewedByte: 0,
     createdAt: now,
     updatedAt: now,
   };
-  await upsertPaneRecord(opts.projectRoot, record);
+  await upsertPaneRecord(record);
   return record;
 }
 

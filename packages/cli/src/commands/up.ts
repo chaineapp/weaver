@@ -1,32 +1,40 @@
-import { readConfig } from "@weaver/core";
+import { readConfig, resolveOrRegister } from "@weaver/core";
 import { hasSession, newSession, splitPane, listPanes, openGhostty } from "@weaver/tmux";
+import { resolve } from "node:path";
 
-export async function runUp(opts: { panes: number }): Promise<void> {
-  const root = process.cwd();
-  const config = await readConfig(root);
-  if (!config) {
-    console.error("not a weaver project — run `weave init` first");
+export async function runUp(opts: { panes: number; path?: string }): Promise<void> {
+  const cfg = await readConfig();
+  if (!cfg) {
+    console.error("Weaver not initialized yet — run `weave init` once.");
     process.exit(1);
   }
 
-  if (!(await hasSession(config.tmuxSession))) {
-    await newSession({ name: config.tmuxSession, cwd: root, command: "claude" });
-    console.log(`✓ created tmux session ${config.tmuxSession} (pane 0 = claude planner)`);
-  } else {
-    console.log(`✓ tmux session ${config.tmuxSession} already exists, attaching`);
+  const path = resolve(opts.path ?? process.cwd());
+  const { project, worktree, created } = await resolveOrRegister(path);
+  if (created) {
+    console.log(`✓ registered ${project.id}${worktree.id === "main" ? "" : `:${worktree.id}`} (${worktree.path})`);
   }
 
-  const existing = await listPanes(config.tmuxSession);
+  if (!(await hasSession(worktree.tmuxSession))) {
+    await newSession({ name: worktree.tmuxSession, cwd: worktree.path, command: "claude" });
+    console.log(`✓ created tmux session ${worktree.tmuxSession} (pane 0 = claude planner)`);
+  } else {
+    console.log(`✓ tmux session ${worktree.tmuxSession} already exists`);
+  }
+
+  const existing = await listPanes(worktree.tmuxSession);
   const needed = opts.panes - existing.length;
   for (let i = 0; i < needed; i++) {
     const paneId = await splitPane({
-      target: config.tmuxSession,
+      target: worktree.tmuxSession,
       direction: "vertical",
-      cwd: root,
+      cwd: worktree.path,
     });
-    console.log(`  + split pane ${paneId} (idle — the planner will launch Codex in it via MCP)`);
+    console.log(`  + split pane ${paneId} (idle — the planner launches Codex in it via MCP)`);
   }
 
-  await openGhostty({ tmuxSession: config.tmuxSession, cwd: root });
-  console.log(`\n✓ Ghostty opened. Drive the planner in pane 0 (claude). It has access to the weaver MCP tools.`);
+  await openGhostty({ tmuxSession: worktree.tmuxSession, cwd: worktree.path });
+  console.log(
+    `\n✓ Ghostty opened for ${project.id}${worktree.id === "main" ? "" : `:${worktree.id}`}. Drive the planner in pane 0.`,
+  );
 }

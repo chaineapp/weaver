@@ -1,18 +1,31 @@
-import { paths } from "./paths.ts";
+import { weavePaths } from "./paths.ts";
 
-export type ProjectConfig = {
-  projectName: string;
-  tmuxSession: string;
+// Global user settings. Mostly defaults today; more will show up as Weaver
+// grows (default model, polling interval, memory promotion cadence, ...).
+
+export type WeaveConfig = {
+  version: 1;
   defaultModel?: string;
+  defaultWaitTimeoutSeconds: number;
   createdAt: string;
 };
 
-export async function readConfig(projectRoot: string): Promise<ProjectConfig | null> {
-  const file = Bun.file(paths(projectRoot).config);
+const DEFAULT_CONFIG: WeaveConfig = {
+  version: 1,
+  defaultWaitTimeoutSeconds: 30,
+  createdAt: new Date(0).toISOString(), // overwritten on first init
+};
+
+export async function readConfig(): Promise<WeaveConfig | null> {
+  const file = Bun.file(weavePaths().config);
   if (!(await file.exists())) return null;
-  return (await file.json()) as ProjectConfig;
+  return (await file.json()) as WeaveConfig;
 }
 
-export async function writeConfig(projectRoot: string, config: ProjectConfig): Promise<void> {
-  await Bun.write(paths(projectRoot).config, JSON.stringify(config, null, 2) + "\n");
+export async function writeConfig(config: WeaveConfig): Promise<void> {
+  await Bun.write(weavePaths().config, JSON.stringify(config, null, 2) + "\n");
+}
+
+export function defaultConfig(): WeaveConfig {
+  return { ...DEFAULT_CONFIG, createdAt: new Date().toISOString() };
 }
