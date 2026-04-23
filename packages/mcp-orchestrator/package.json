@@ -1,0 +1,25 @@
+{
+  "name": "@weaver/mcp-orchestrator",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "bin": {
+    "weaver-mcp": "./src/bin.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "bun test",
+    "start": "bun run src/index.ts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@weaver/codex-adapter": "workspace:*",
+    "@weaver/core": "workspace:*",
+    "@weaver/tmux": "workspace:*",
+    "zod": "^4.3.6",
+    "zod-to-json-schema": "^3.25.2"
+  }
+}

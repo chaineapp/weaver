@@ -1,0 +1,19 @@
+{
+  "name": "@weaver/cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "weave": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@weaver/codex-adapter": "workspace:*",
+    "@weaver/core": "workspace:*",
+    "@weaver/mcp-orchestrator": "workspace:*",
+    "@weaver/tmux": "workspace:*"
+  }
+}

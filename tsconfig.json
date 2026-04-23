@@ -16,7 +16,7 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "noPropertyAccessFromIndexSignature": false,
-    "types": ["bun-types"]
+    "types": ["bun"]
   },
   "include": ["packages/*/src/**/*"]
 }

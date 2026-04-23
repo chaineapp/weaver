@@ -33,7 +33,7 @@ export function summarize(events: CodexEvent[]): PaneSummary {
         break;
       case "turn.completed": {
         summary.status = "completed";
-        const usage = "usage" in event ? event.usage : undefined;
+        const usage = "usage" in event ? (event.usage as { total_tokens?: number } | undefined) : undefined;
         if (usage?.total_tokens) summary.totalTokens += usage.total_tokens;
         break;
       }
