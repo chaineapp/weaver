@@ -36,5 +36,8 @@ export function weavePaths(): WeavePaths {
 }
 
 function sanitizePaneId(paneId: string): string {
-  return paneId.replace(/[^A-Za-z0-9_%-]/g, "_");
+  // Strip `%` — tmux's pipe-pane command runs through strftime, which would
+  // mangle `%1` as a (nonexistent) format specifier and eat the character.
+  // The remaining numeric id is unique enough within ~/.weave/runs/.
+  return paneId.replace(/%/g, "").replace(/[^A-Za-z0-9_-]/g, "_");
 }
