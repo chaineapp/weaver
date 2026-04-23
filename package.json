@@ -1,0 +1,27 @@
+{
+  "name": "weaver",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Coding agent orchestrator. A Bun CLI that spawns Codex workers in tmux-under-Ghostty and exposes them to a planner Claude via MCP.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/chaineapp/weaver.git"
+  },
+  "workspaces": [
+    "packages/*"
+  ],
+  "engines": {
+    "bun": ">=1.2.0"
+  },
+  "scripts": {
+    "typecheck": "bun --filter '*' typecheck",
+    "test": "bun test",
+    "build": "bun --filter '*' build",
+    "weave": "bun run packages/cli/src/index.ts"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5.6.0"
+  }
+}

@@ -1,0 +1,19 @@
+node_modules/
+dist/
+.DS_Store
+*.log
+.env
+.env.*
+!.env.example
+
+# bun
+bun.lockb.bak
+
+# Weaver runtime
+.weave/
+~/.weave/
+
+# Editor
+.vscode/
+.idea/
+*.swp
