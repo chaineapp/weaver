@@ -13,6 +13,10 @@
       "name": "@weaver/codex-adapter",
       "version": "0.1.0",
     },
+    "packages/tmux": {
+      "name": "@weaver/tmux",
+      "version": "0.1.0",
+    },
   },
   "packages": {
     "@types/bun": ["@types/bun@1.3.13", "", { "dependencies": { "bun-types": "1.3.13" } }, "sha512-9fqXWk5YIHGGnUau9TEi+qdlTYDAnOj+xLCmSTwXfAIqXr2x4tytJb43E9uCvt09zJURKXwAtkoH4nLQfzeTXw=="],
@@ -20,6 +24,8 @@
     "@types/node": ["@types/node@25.6.0", "", { "dependencies": { "undici-types": "~7.19.0" } }, "sha512-+qIYRKdNYJwY3vRCZMdJbPLJAtGjQBudzZzdzwQYkEPQd+PJGixUL5QfvCLDaULoLv+RhT3LDkwEfKaAkgSmNQ=="],
 
     "@weaver/codex-adapter": ["@weaver/codex-adapter@workspace:packages/codex-adapter"],
+
+    "@weaver/tmux": ["@weaver/tmux@workspace:packages/tmux"],
 
     "bun-types": ["bun-types@1.3.13", "", { "dependencies": { "@types/node": "*" } }, "sha512-QXKeHLlOLqQX9LgYaHJfzdBaV21T63HhFJnvuRCcjZiaUDpbs5ED1MgxbMra71CsryN/1dAoXuJJJwIv/2drVA=="],
 
