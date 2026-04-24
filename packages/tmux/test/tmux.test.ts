@@ -13,6 +13,35 @@ describe.if(hasTmux)("tmux integration", () => {
     expect(await hasSession(sessionName)).toBe(false);
   });
 
+  test("newSession enables mouse + focus-events by default", async () => {
+    const session = `${sessionName}-opts`;
+    try {
+      await newSession({ name: session });
+      const { getOption } = await import("../src/tmux.ts");
+      expect(await getOption(session, "mouse")).toBe("on");
+      expect(await getOption(session, "focus-events")).toBe("on");
+    } finally {
+      await killSession(session);
+    }
+  });
+
+  test("selectPane makes a pane active", async () => {
+    const session = `${sessionName}-active`;
+    try {
+      await newSession({ name: session });
+      const newPaneId = await splitPane({ target: session, direction: "vertical" });
+      // After split, the new pane is active. Re-select pane 0 and verify.
+      const { selectPane } = await import("../src/tmux.ts");
+      await selectPane(`${session}:0.0`);
+      const panes = await listPanes(session);
+      const active = panes.find((p) => p.active);
+      expect(active).toBeDefined();
+      expect(active!.paneId).not.toBe(newPaneId);
+    } finally {
+      await killSession(session);
+    }
+  });
+
   test("splitPane returns a pane id; listPanes sees it; killPane removes it", async () => {
     const session = `${sessionName}-split`;
     try {

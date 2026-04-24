@@ -51,14 +51,15 @@ export async function newSession(opts: {
   detached?: boolean;
   command?: string;
   env?: Record<string, string>;
+  /** Default true: enable `mouse on` so click-to-focus works in Ghostty. */
+  mouse?: boolean;
+  /** Default true: enable `focus-events on` so Claude Code stops nagging. */
+  focusEvents?: boolean;
 }): Promise<void> {
   const args = ["new-session"];
   if (opts.detached !== false) args.push("-d");
   args.push("-s", opts.name);
   if (opts.cwd) args.push("-c", opts.cwd);
-  // tmux -e VAR=val sets env vars for the session's processes. Cleaner than
-  // shell-prefixing the command string (which requires the command to be
-  // interpreted by a shell, and fails silently if the shell config misbehaves).
   if (opts.env) {
     for (const [k, v] of Object.entries(opts.env)) {
       args.push("-e", `${k}=${v}`);
@@ -66,6 +67,31 @@ export async function newSession(opts: {
   }
   if (opts.command) args.push(opts.command);
   await runOrThrow(args);
+
+  // Apply per-session options after creation. `set-option -t <session> <opt>` is
+  // session-scoped and doesn't bleed into the user's other tmux work.
+  if (opts.mouse !== false) {
+    await runOrThrow(["set-option", "-t", opts.name, "mouse", "on"]);
+  }
+  if (opts.focusEvents !== false) {
+    await runOrThrow(["set-option", "-t", opts.name, "focus-events", "on"]);
+  }
+}
+
+export async function selectPane(paneTarget: string): Promise<void> {
+  await runOrThrow(["select-pane", "-t", paneTarget]);
+}
+
+export async function getOption(
+  target: string,
+  option: string,
+): Promise<string | null> {
+  const { stdout, code } = await runTmux(["show-options", "-t", target, option]);
+  if (code !== 0) return null;
+  // tmux prints e.g. `mouse on` — take the value after the first space.
+  const line = stdout.trim();
+  const idx = line.indexOf(" ");
+  return idx < 0 ? null : line.slice(idx + 1);
 }
 
 export async function killSession(name: string): Promise<void> {

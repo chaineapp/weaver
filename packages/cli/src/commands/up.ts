@@ -1,5 +1,5 @@
 import { findWorkspace, getProject, listProjects } from "@weaver/core";
-import { hasSession, newSession, listPanes, openGhostty, buildPlannerLayout } from "@weaver/tmux";
+import { hasSession, newSession, listPanes, openGhostty, buildPlannerLayout, selectPane } from "@weaver/tmux";
 
 // `weave up --project <id> --panes <workers>`:
 //   - creates tmux session weave-<id> if missing, pane 0 runs `claude`
@@ -49,10 +49,14 @@ export async function runUp(opts: { project?: string; panes: number }): Promise<
     console.log(`✓ started planner tmux session ${plannerSession}`);
 
     const workerPanes = await buildPlannerLayout(plannerSession, opts.panes);
+    // Return focus to the planner so the user lands in Claude, not a worker.
+    await selectPane(`${plannerSession}:0.0`);
     console.log(`✓ laid out ${workerPanes.length} worker pane(s) on the right (planner on left)`);
   } else {
     const existing = await listPanes(plannerSession);
     console.log(`✓ planner tmux session ${plannerSession} already running (${existing.length} pane(s))`);
+    console.log(`  (layout preserved — to rebuild, \`weave remove ${project.id}\` then \`weave up\` again)`);
+    await selectPane(`${plannerSession}:0.0`);
   }
 
   await openGhostty({ tmuxSession: plannerSession });

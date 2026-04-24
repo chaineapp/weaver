@@ -29,12 +29,43 @@ async function fresh(name: string): Promise<string> {
   return name;
 }
 
+async function paneGeom(session: string): Promise<{ id: string; left: number; top: number; w: number; h: number }[]> {
+  const proc = Bun.spawn(
+    ["tmux", "list-panes", "-t", session, "-F", "#{pane_id}|#{pane_left}|#{pane_top}|#{pane_width}|#{pane_height}"],
+    { stdout: "pipe" },
+  );
+  const out = await new Response(proc.stdout).text();
+  await proc.exited;
+  return out
+    .trim()
+    .split("\n")
+    .map((line) => {
+      const [id, left, top, w, h] = line.split("|");
+      return { id: id!, left: +left!, top: +top!, w: +w!, h: +h! };
+    });
+}
+
 describe.if(hasTmux)("buildPlannerLayout", () => {
   test("N=1: 1 planner + 1 worker = 2 panes total", async () => {
     const s = await fresh("weave-test-layout-1");
     const workers = await buildPlannerLayout(s, 1);
     expect(workers).toHaveLength(1);
     expect((await listPanes(s)).length).toBe(2);
+  });
+
+  test("planner (pane 0) takes full left half height for every N", async () => {
+    // Guard against regressing to a layout that shrinks the planner vertically.
+    for (const n of [2, 3, 4, 5, 6] as const) {
+      const s = await fresh(`weave-test-layout-fullheight-${n}`);
+      await buildPlannerLayout(s, n);
+      const geom = await paneGeom(s);
+      const maxBottom = Math.max(...geom.map((g) => g.top + g.h));
+      // Pane 0 is the one at left=0,top=0.
+      const planner = geom.find((g) => g.left === 0 && g.top === 0);
+      expect(planner).toBeDefined();
+      // Planner height should span from top (0) to the bottom of the window.
+      expect(planner!.h).toBe(maxBottom);
+    }
   });
 
   test("N=2: 1 planner + 2 workers = 3 panes total", async () => {
