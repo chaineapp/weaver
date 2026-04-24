@@ -247,14 +247,19 @@ describe("weave CLI e2e", () => {
       (Bun as unknown as { spawn: typeof originalSpawn }).spawn = originalSpawn;
     }
 
-    // Last call should be the `open` command. Inside its args after `-e`,
-    // the tmux invocation must start with an absolute path.
+    // After `-e` the argv must be: <absolute-tmux> attach -t <session-name>
+    // as SEPARATE args. A single joined string breaks login's exec.
     const openCall = calls.find((c) => c[0] === "open");
     expect(openCall).toBeDefined();
     const eIdx = openCall!.indexOf("-e");
     expect(eIdx).toBeGreaterThan(-1);
-    const tmuxCmd = openCall![eIdx + 1]!;
-    expect(tmuxCmd.startsWith("/")).toBe(true);
-    expect(tmuxCmd).toMatch(/\/tmux attach -t /);
+    const tmuxArg = openCall![eIdx + 1]!;
+    expect(tmuxArg.startsWith("/")).toBe(true);
+    expect(tmuxArg).toMatch(/\/tmux$/);
+    // No spaces in the tmux arg — it's the path alone, not a full command.
+    expect(tmuxArg).not.toContain(" ");
+    expect(openCall![eIdx + 2]).toBe("attach");
+    expect(openCall![eIdx + 3]).toBe("-t");
+    expect(openCall![eIdx + 4]).toBe("weave-test-nonexistent");
   });
 });

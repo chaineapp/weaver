@@ -1,15 +1,17 @@
 // Ghostty integration. Keep this minimal: Weaver's programmable surface is
-// tmux, not Ghostty. Ghostty is just the visible terminal that attaches to a
-// tmux session.
+// tmux, not Ghostty.
 
 export async function openGhostty(opts: { tmuxSession: string }): Promise<void> {
-  // macOS: Ghostty wraps the `-e` command with `/usr/bin/login -flp <user>`,
-  // and login's PATH is minimal (`/usr/bin:/bin:/usr/sbin:/sbin`). Homebrew's
-  // tmux lives at /usr/local/bin or /opt/homebrew/bin, which login cannot see.
-  // Resolve the absolute path of tmux here so login can exec it directly.
+  // Two gotchas discovered the hard way:
+  //   1. Ghostty wraps `-e` commands with `/usr/bin/login -flp <user>`, and
+  //      login's PATH is minimal. So we need the absolute path to tmux.
+  //   2. Ghostty's `-e` does NOT split its argument on whitespace. Everything
+  //      after `-e` up to the next Ghostty flag is the command + args as
+  //      separate argv entries. So we must pass tmux + attach + -t + session
+  //      as FOUR separate `--args` entries. Quoting a whole command string
+  //      would make login try to exec the literal space-separated string.
   const tmux = await resolveTmuxPath();
-  const attachCmd = `${tmux} attach -t ${shellQuote(opts.tmuxSession)}`;
-  const args = ["-na", "Ghostty", "--args", "-e", attachCmd];
+  const args = ["-na", "Ghostty", "--args", "-e", tmux, "attach", "-t", opts.tmuxSession];
   const proc = Bun.spawn(["open", ...args], { stdout: "pipe", stderr: "pipe" });
   const code = await proc.exited;
   if (code !== 0) {
@@ -33,8 +35,4 @@ export async function isGhosttyInstalled(): Promise<boolean> {
     stderr: "pipe",
   });
   return (await proc.exited) === 0;
-}
-
-function shellQuote(s: string): string {
-  return `'${s.replace(/'/g, "'\\''")}'`;
 }
