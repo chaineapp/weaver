@@ -221,4 +221,40 @@ describe("weave CLI e2e", () => {
     expect(r.code).toBe(0);
     expect(r.stdout).toContain("cleaned Weaver state");
   });
+
+  test("Ghostty attach command uses absolute tmux path (login PATH safe)", async () => {
+    // Regression guard for the bug where Ghostty's login wrapper couldn't find
+    // `tmux` in its minimal PATH. openGhostty must resolve and embed the
+    // absolute tmux path so `/usr/bin/login -flp <user> <cmd>` can exec it.
+    // We can't actually open Ghostty in a test, so we monkey-patch Bun.spawn
+    // to capture the args and assert on them.
+    const { openGhostty } = await import("@weaver/tmux");
+    const originalSpawn = Bun.spawn;
+    const calls: string[][] = [];
+    (Bun as unknown as { spawn: unknown }).spawn = ((
+      cmd: string[],
+      ...rest: unknown[]
+    ) => {
+      calls.push(cmd);
+      return originalSpawn(cmd, ...(rest as Parameters<typeof originalSpawn>));
+    }) as typeof Bun.spawn;
+
+    try {
+      await openGhostty({ tmuxSession: "weave-test-nonexistent" });
+    } catch {
+      /* expected — Ghostty may not be installed or session doesn't exist */
+    } finally {
+      (Bun as unknown as { spawn: typeof originalSpawn }).spawn = originalSpawn;
+    }
+
+    // Last call should be the `open` command. Inside its args after `-e`,
+    // the tmux invocation must start with an absolute path.
+    const openCall = calls.find((c) => c[0] === "open");
+    expect(openCall).toBeDefined();
+    const eIdx = openCall!.indexOf("-e");
+    expect(eIdx).toBeGreaterThan(-1);
+    const tmuxCmd = openCall![eIdx + 1]!;
+    expect(tmuxCmd.startsWith("/")).toBe(true);
+    expect(tmuxCmd).toMatch(/\/tmux attach -t /);
+  });
 });

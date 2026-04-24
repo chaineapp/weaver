@@ -3,11 +3,12 @@
 // tmux session.
 
 export async function openGhostty(opts: { tmuxSession: string }): Promise<void> {
-  // macOS: `open -na Ghostty --args -e "tmux attach -t <session>"`.
-  // Do NOT pass --working-directory after -e — Ghostty's arg parser consumes
-  // everything after -e as part of the command, so late flags end up appended
-  // to the tmux invocation.
-  const attachCmd = `tmux attach -t ${shellQuote(opts.tmuxSession)}`;
+  // macOS: Ghostty wraps the `-e` command with `/usr/bin/login -flp <user>`,
+  // and login's PATH is minimal (`/usr/bin:/bin:/usr/sbin:/sbin`). Homebrew's
+  // tmux lives at /usr/local/bin or /opt/homebrew/bin, which login cannot see.
+  // Resolve the absolute path of tmux here so login can exec it directly.
+  const tmux = await resolveTmuxPath();
+  const attachCmd = `${tmux} attach -t ${shellQuote(opts.tmuxSession)}`;
   const args = ["-na", "Ghostty", "--args", "-e", attachCmd];
   const proc = Bun.spawn(["open", ...args], { stdout: "pipe", stderr: "pipe" });
   const code = await proc.exited;
@@ -15,6 +16,15 @@ export async function openGhostty(opts: { tmuxSession: string }): Promise<void> 
     const stderr = await new Response(proc.stderr).text();
     throw new Error(`failed to open Ghostty: ${stderr.trim()}`);
   }
+}
+
+async function resolveTmuxPath(): Promise<string> {
+  const proc = Bun.spawn(["which", "tmux"], { stdout: "pipe", stderr: "pipe" });
+  const out = await new Response(proc.stdout).text();
+  await proc.exited;
+  const path = out.trim();
+  if (!path) throw new Error("tmux not found in PATH — install with `brew install tmux`");
+  return path;
 }
 
 export async function isGhosttyInstalled(): Promise<boolean> {
