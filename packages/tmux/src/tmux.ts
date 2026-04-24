@@ -94,6 +94,19 @@ export async function getOption(
   return idx < 0 ? null : line.slice(idx + 1);
 }
 
+// Customize the left side of the status bar for one session. Used by
+// `weave up` to surface the project name without affecting other sessions.
+// Styling: reverse-video block so it pops out of the status bar.
+export async function setStatusLeft(session: string, text: string): Promise<void> {
+  // #[reverse] turns on reverse-video; #[default] restores defaults. We wrap
+  // the user-supplied text so colors are contained to this segment.
+  const formatted = `#[reverse,bold]${text}#[default] `;
+  await runOrThrow(["set-option", "-t", session, "status-left", formatted]);
+  // Give it enough room — the default status-left-length is 10.
+  const len = String(Math.max(40, text.length + 4));
+  await runOrThrow(["set-option", "-t", session, "status-left-length", len]);
+}
+
 export async function killSession(name: string): Promise<void> {
   const { code, stderr } = await runTmux(["kill-session", "-t", name]);
   if (code !== 0 && !stderr.includes("can't find session") && !stderr.includes("no server running")) {

@@ -1,5 +1,5 @@
 import { findWorkspace, getProject, listProjects } from "@weaver/core";
-import { hasSession, newSession, listPanes, openGhostty, buildPlannerLayout, selectPane } from "@weaver/tmux";
+import { hasSession, newSession, listPanes, openGhostty, buildPlannerLayout, selectPane, setStatusLeft } from "@weaver/tmux";
 
 // `weave up --project <id> --panes <workers>`:
 //   - creates tmux session weave-<id> if missing, pane 0 runs `claude`
@@ -58,6 +58,11 @@ export async function runUp(opts: { project?: string; panes: number }): Promise<
     console.log(`  (layout preserved — to rebuild, \`weave remove ${project.id}\` then \`weave up\` again)`);
     await selectPane(`${plannerSession}:0.0`);
   }
+
+  // Always refresh the status bar — the project name or linear ticket may have
+  // changed since the session was first created.
+  const ticket = project.linearTicket ? ` | ${project.linearTicket}` : "";
+  await setStatusLeft(plannerSession, ` weaver | ${project.name}${ticket} `);
 
   await openGhostty({ tmuxSession: plannerSession });
   console.log(`\n✓ Ghostty attached. Planner is on the left, bound to project ${project.id}.`);

@@ -42,6 +42,22 @@ describe.if(hasTmux)("tmux integration", () => {
     }
   });
 
+  test("setStatusLeft writes a visible project name into the status bar", async () => {
+    const session = `${sessionName}-status`;
+    try {
+      await newSession({ name: session });
+      const { setStatusLeft, getOption } = await import("../src/tmux.ts");
+      await setStatusLeft(session, " weaver | shipment-revamp | CHA-950 ");
+      const got = await getOption(session, "status-left");
+      expect(got).toContain("weaver | shipment-revamp | CHA-950");
+      // And the length option was expanded so the whole string fits.
+      const len = await getOption(session, "status-left-length");
+      expect(Number(len)).toBeGreaterThanOrEqual(40);
+    } finally {
+      await killSession(session);
+    }
+  });
+
   test("splitPane returns a pane id; listPanes sees it; killPane removes it", async () => {
     const session = `${sessionName}-split`;
     try {
