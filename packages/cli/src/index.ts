@@ -20,7 +20,10 @@ One-time setup:
 Project lifecycle (a project spans 1..N repos via git worktrees):
   weave new [--name X] [--linear CHA-123]   create a project
   weave list                                list projects in current workspace
-  weave up [--project ID] [--panes N]       open Ghostty: planner left, N workers in a grid on right (N: 1-6)
+  weave up [--project ID] [--panes N] [--bypass]
+                                            open Ghostty: planner left, N workers in a grid (N: 1-6)
+                                            --bypass: launch claude with --dangerously-skip-permissions
+                                            (or export WEAVER_CLAUDE_BYPASS=1 to make it default)
   weave remove ID [--worktrees]             delete project (optionally drop worktrees)
 
 Inspection:
@@ -88,6 +91,11 @@ async function main() {
         options: { name: { type: "string" }, linear: { type: "string" } },
         strict: true,
       });
+      if (!values.name) {
+        console.error("usage: weave new --name <name> [--linear CHA-XXX]");
+        console.error("  name is required — becomes the project folder name under ~/Code/.weaver/projects/");
+        process.exit(1);
+      }
       await runProjectNew({ name: values.name, linear: values.linear });
       return;
     }
@@ -115,7 +123,11 @@ async function main() {
     case "up": {
       const { values } = parseArgs({
         args: rest,
-        options: { project: { type: "string" }, panes: { type: "string" } },
+        options: {
+          project: { type: "string" },
+          panes: { type: "string" },
+          bypass: { type: "boolean" },
+        },
         strict: true,
       });
       const n = values.panes ? Number.parseInt(values.panes, 10) : 2;
@@ -123,7 +135,7 @@ async function main() {
         console.error(`--panes must be 1..6 (got ${values.panes})`);
         process.exit(1);
       }
-      await runUp({ project: values.project, panes: n });
+      await runUp({ project: values.project, panes: n, bypass: values.bypass });
       return;
     }
 

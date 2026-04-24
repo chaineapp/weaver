@@ -1,6 +1,6 @@
 import { findWorkspace, createProject, listProjects, getProject, teardownProject } from "@weaver/core";
 
-export async function runProjectNew(opts: { name?: string; linear?: string }): Promise<void> {
+export async function runProjectNew(opts: { name: string; linear?: string }): Promise<void> {
   const ws = await findWorkspace();
   if (!ws) {
     console.error("not inside a Weaver workspace — run `weave workspace init` first");

@@ -46,12 +46,41 @@ describe("workspace", () => {
 });
 
 describe("projects", () => {
+  test("id is derived from slugified name; duplicates get -2, -3 suffixes", async () => {
+    const { initWorkspace, createProject } = await import("../src/index.ts");
+    const wsRoot = await mkdtemp(join(tmpdir(), "weaver-ws-"));
+    const ws = await initWorkspace(wsRoot);
+
+    const a = await createProject(ws, { name: "Tracking Fraud Notifications" });
+    expect(a.id).toBe("tracking-fraud-notifications");
+
+    const b = await createProject(ws, { name: "Tracking Fraud Notifications" });
+    expect(b.id).toBe("tracking-fraud-notifications-2");
+
+    const c = await createProject(ws, { name: "Tracking Fraud Notifications" });
+    expect(c.id).toBe("tracking-fraud-notifications-3");
+
+    // Names with special chars slugify sensibly
+    const d = await createProject(ws, { name: "feat/auth — token refresh (v2)" });
+    expect(d.id).toBe("feat-auth-token-refresh-v2");
+
+    await rm(wsRoot, { recursive: true });
+  });
+
+  test("name is required", async () => {
+    const { initWorkspace, createProject } = await import("../src/index.ts");
+    const wsRoot = await mkdtemp(join(tmpdir(), "weaver-ws-"));
+    const ws = await initWorkspace(wsRoot);
+    await expect(createProject(ws, { name: "" })).rejects.toThrow();
+    await rm(wsRoot, { recursive: true });
+  });
+
   test("createProject + listProjects + getProject", async () => {
     const { initWorkspace, createProject, listProjects, getProject } = await import("../src/index.ts");
     const wsRoot = await mkdtemp(join(tmpdir(), "weaver-ws-"));
     const ws = await initWorkspace(wsRoot);
     const p = await createProject(ws, { name: "shipment-v2", linearTicket: "CHA-950" });
-    expect(p.id).toMatch(/^[0-9A-Z]{10}-[0-9A-Z]{4}$/);
+    expect(p.id).toBe("shipment-v2");
     expect(p.name).toBe("shipment-v2");
     expect(p.linearTicket).toBe("CHA-950");
 

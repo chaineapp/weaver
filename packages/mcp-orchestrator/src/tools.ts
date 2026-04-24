@@ -31,7 +31,7 @@ import { spawnWorker } from "./spawn.ts";
 export const CurrentProjectInput = z.object({});
 export const ListProjectsInput = z.object({});
 export const NewProjectInput = z.object({
-  name: z.string().optional(),
+  name: z.string().min(1).describe("Project name — becomes the project folder slug (e.g. 'tracking-fraud')."),
   linear_ticket: z.string().optional(),
 });
 export const RegisterRepoInput = z.object({

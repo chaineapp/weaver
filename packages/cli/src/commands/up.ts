@@ -1,6 +1,12 @@
 import { findWorkspace, getProject, listProjects } from "@weaver/core";
 import { hasSession, newSession, listPanes, openGhostty, buildPlannerLayout, selectPane, setStatusLeft } from "@weaver/tmux";
 
+// Build the command string used to launch the planner Claude inside tmux.
+// Exported for unit-testing — avoids re-running the whole CLI to check flags.
+export function buildPlannerCommand(opts: { bypass?: boolean } = {}): string {
+  return opts.bypass ? "claude --dangerously-skip-permissions" : "claude";
+}
+
 // `weave up --project <id> --panes <workers>`:
 //   - creates tmux session weave-<id> if missing, pane 0 runs `claude`
 //   - builds a planner-left + workers-grid-right layout on first creation
@@ -9,7 +15,7 @@ import { hasSession, newSession, listPanes, openGhostty, buildPlannerLayout, sel
 // --panes N = number of WORKER panes on the right (1..6). The planner is
 // always in addition. So --panes 4 gives you: 1 planner + 2x2 workers.
 
-export async function runUp(opts: { project?: string; panes: number }): Promise<void> {
+export async function runUp(opts: { project?: string; panes: number; bypass?: boolean }): Promise<void> {
   const ws = await findWorkspace();
   if (!ws) {
     console.error("not inside a Weaver workspace — run `weave workspace init` first");
@@ -43,17 +49,22 @@ export async function runUp(opts: { project?: string; panes: number }): Promise<
   const { join } = await import("node:path");
   const plannerCwd = join(ws.weaveDir, "projects", project.id);
 
+  // Honor WEAVER_CLAUDE_BYPASS=1 from the user's shell env as a persistent default.
+  const envBypass = process.env.WEAVER_CLAUDE_BYPASS === "1";
+  const bypass = opts.bypass ?? envBypass;
+  const plannerCmd = buildPlannerCommand({ bypass });
+
   if (isFresh) {
     await newSession({
       name: plannerSession,
       cwd: plannerCwd,
-      command: "claude",
+      command: plannerCmd,
       env: {
         WEAVER_WORKSPACE_ROOT: ws.root,
         WEAVER_PROJECT_ID: project.id,
       },
     });
-    console.log(`✓ started planner tmux session ${plannerSession}`);
+    console.log(`✓ started planner tmux session ${plannerSession}${bypass ? " (bypass permissions ON)" : ""}`);
 
     const workerPanes = await buildPlannerLayout(plannerSession, opts.panes, { cwd: plannerCwd });
     // Return focus to the planner so the user lands in Claude, not a worker.

@@ -121,9 +121,11 @@ describe("weave CLI e2e", () => {
       home: tempHome,
     });
     expect(r.code).toBe(0);
-    const match = r.stdout.match(/created project ([0-9A-Z]{10}-[0-9A-Z]{4})/);
+    const match = r.stdout.match(/created project ([a-z0-9][a-z0-9-]*)/);
     expect(match).not.toBeNull();
     projectId = match![1]!;
+    // Id is a slug derived from the name we passed (`test-proj`).
+    expect(projectId).toBe("test-proj");
     expect(existsSync(join(workspace, ".weaver", "projects", projectId, "project.json"))).toBe(true);
     expect(existsSync(join(workspace, ".weaver", "projects", projectId, "worktrees"))).toBe(true);
   });

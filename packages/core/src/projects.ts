@@ -1,7 +1,7 @@
 import { join, resolve } from "node:path";
 import { mkdir, rm } from "node:fs/promises";
 import { workspacePaths, type Workspace } from "./workspace.ts";
-import { newProjectId, worktreeName as deriveWorktreeName } from "./ids.ts";
+import { slugify, worktreeName as deriveWorktreeName } from "./ids.ts";
 
 // A Project is the user's unit of work — bound to one planner Claude session,
 // spanning 1..N repos via git worktrees. Lives under <workspace>/.weaver/projects/<id>/.
@@ -40,9 +40,14 @@ function projectPaths(workspaceRoot: string, id: string) {
 
 export async function createProject(
   workspace: Workspace,
-  opts: { name?: string; linearTicket?: string } = {},
+  opts: { name: string; linearTicket?: string },
 ): Promise<ProjectRecord> {
-  const id = newProjectId();
+  if (!opts.name?.trim()) throw new Error("project name is required");
+
+  // Id is derived from the name — human-readable, filesystem-navigable,
+  // appears in tmux session names, MCP responses, and CLAUDE.md. On
+  // collision, suffix with -2, -3, ... so duplicates still land cleanly.
+  const id = await uniqueProjectSlug(workspace, opts.name);
   const p = projectPaths(workspace.root, id);
   await mkdir(p.base, { recursive: true });
   await mkdir(p.worktreesDir, { recursive: true });
@@ -50,7 +55,7 @@ export async function createProject(
   const now = new Date().toISOString();
   const record: ProjectRecord = {
     id,
-    name: opts.name ?? id,
+    name: opts.name,
     linearTicket: opts.linearTicket,
     workspaceRoot: workspace.root,
     worktrees: {},
@@ -61,6 +66,17 @@ export async function createProject(
   await Bun.write(p.notes, `# ${record.name}\n\nCreated ${now}\n${opts.linearTicket ? `\nLinear: ${opts.linearTicket}\n` : ""}`);
   await Bun.write(join(p.base, "CLAUDE.md"), buildPlannerClaudeMd(record, workspace));
   return record;
+}
+
+async function uniqueProjectSlug(workspace: Workspace, name: string): Promise<string> {
+  const base = slugify(name) || "project";
+  const projectsDir = workspacePaths(workspace.root).projectsDir;
+  let candidate = base;
+  let suffix = 2;
+  while (await Bun.file(join(projectsDir, candidate, "project.json")).exists()) {
+    candidate = `${base}-${suffix++}`;
+  }
+  return candidate;
 }
 
 // CLAUDE.md read by the planner Claude on session start. Claude Code walks up
