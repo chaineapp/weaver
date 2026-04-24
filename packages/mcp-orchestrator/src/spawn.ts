@@ -26,12 +26,17 @@ export async function spawnWorker(opts: SpawnOptions): Promise<PaneRecord> {
   await pipePane(paneId, runFile);
 
   // Resolve worker defaults from ~/.weave/config.json. spawn_pane's model arg
-  // overrides config; bypass + extraArgs come from config unconditionally.
+  // overrides config; binary + bypass + extraArgs come from config.
   const cfg = await readConfig();
-  const model = opts.model ?? cfg?.worker?.model;
-  const bypass = cfg?.worker?.bypass ?? false;
-  const extraArgs = cfg?.worker?.extraArgs;
-  await sendKeys(paneId, buildCodexCommand(opts.task, { model, bypass, extraArgs }));
+  await sendKeys(
+    paneId,
+    buildCodexCommand(opts.task, {
+      binary: cfg?.worker?.binary,
+      model: opts.model ?? cfg?.worker?.model,
+      bypass: cfg?.worker?.bypass ?? false,
+      extraArgs: cfg?.worker?.extraArgs,
+    }),
+  );
 
   const now = new Date().toISOString();
   const record: PaneRecord = {
@@ -54,10 +59,14 @@ export async function spawnWorker(opts: SpawnOptions): Promise<PaneRecord> {
 
 export function buildCodexCommand(
   task: string,
-  opts: { model?: string; bypass?: boolean; extraArgs?: string } = {},
+  opts: { binary?: string; model?: string; bypass?: boolean; extraArgs?: string } = {},
 ): string {
-  const parts = ["codex", "exec", "--json"];
-  if (opts.bypass) parts.push("--dangerously-bypass-approvals-and-sandbox");
+  // Worker defaults to `codex exec --json`. If the user set worker.binary to
+  // something custom (aider, etc.), they own the invocation flags — we only
+  // pass the task and their extraArgs.
+  const binary = opts.binary || "codex";
+  const parts: string[] = binary === "codex" ? ["codex", "exec", "--json"] : [binary];
+  if (opts.bypass && binary === "codex") parts.push("--dangerously-bypass-approvals-and-sandbox");
   if (opts.model) parts.push("--model", shellQuote(opts.model));
   if (opts.extraArgs) parts.push(opts.extraArgs);
   parts.push(shellQuote(task));

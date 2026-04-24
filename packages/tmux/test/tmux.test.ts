@@ -64,6 +64,19 @@ describe.if(hasTmux)("tmux integration", () => {
     }
   });
 
+  test("installWeaverMenu binds F12 to display-menu on the server", async () => {
+    // bind-key requires an existing tmux server — create a throwaway session first
+    const session = `${sessionName}-kb`;
+    await newSession({ name: session });
+    try {
+      const { installWeaverMenu, isWeaverMenuInstalled } = await import("../src/keybindings.ts");
+      await installWeaverMenu();
+      expect(await isWeaverMenuInstalled()).toBe(true);
+    } finally {
+      await killSession(session);
+    }
+  });
+
   test("setStatusLeft writes a visible project name into the status bar", async () => {
     const session = `${sessionName}-status`;
     try {

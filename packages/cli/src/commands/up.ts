@@ -1,11 +1,19 @@
 import { findWorkspace, getProject, listProjects, readConfig } from "@weaver/core";
-import { hasSession, newSession, listPanes, openGhostty, buildPlannerLayout, selectPane, setStatusLeft } from "@weaver/tmux";
+import { hasSession, newSession, listPanes, openGhostty, buildPlannerLayout, selectPane, setStatusLeft, installWeaverMenu } from "@weaver/tmux";
 
-// Build the command string used to launch the planner Claude inside tmux.
+// Build the command string used to launch the planner agent inside tmux.
 // Exported for unit-testing — avoids re-running the whole CLI to check flags.
-export function buildPlannerCommand(opts: { bypass?: boolean; model?: string; extraArgs?: string } = {}): string {
-  const parts = ["claude"];
-  if (opts.bypass) parts.push("--dangerously-skip-permissions");
+// Bypass flag is only auto-added for `claude`; custom binaries must use
+// extraArgs to supply their own permission-skip equivalent.
+export function buildPlannerCommand(opts: {
+  binary?: string;
+  bypass?: boolean;
+  model?: string;
+  extraArgs?: string;
+} = {}): string {
+  const binary = opts.binary || "claude";
+  const parts = [binary];
+  if (opts.bypass && binary === "claude") parts.push("--dangerously-skip-permissions");
   if (opts.model) parts.push("--model", opts.model);
   if (opts.extraArgs) parts.push(opts.extraArgs);
   return parts.join(" ");
@@ -57,9 +65,12 @@ export async function runUp(opts: { project?: string; panes: number; bypass?: bo
   const cfg = await readConfig();
   const envBypass = process.env.WEAVER_CLAUDE_BYPASS === "1";
   const bypass = opts.bypass ?? envBypass ?? cfg?.planner?.bypass ?? false;
-  const model = cfg?.planner?.model;
-  const extraArgs = cfg?.planner?.extraArgs;
-  const plannerCmd = buildPlannerCommand({ bypass, model, extraArgs });
+  const plannerCmd = buildPlannerCommand({
+    binary: cfg?.planner?.binary,
+    bypass,
+    model: cfg?.planner?.model,
+    extraArgs: cfg?.planner?.extraArgs,
+  });
 
   if (isFresh) {
     await newSession({
@@ -88,7 +99,11 @@ export async function runUp(opts: { project?: string; panes: number; bypass?: bo
   // see at a glance whether bypass is on. Refreshed on every `weave up`.
   const ticket = project.linearTicket ? ` | ${project.linearTicket}` : "";
   const flags = bypass ? " | bypass" : "";
-  await setStatusLeft(plannerSession, ` weaver | ${project.name}${ticket}${flags} `);
+  await setStatusLeft(plannerSession, ` weaver | ${project.name}${ticket}${flags}  [F12=menu] `);
+
+  // In-Ghostty control surface — F12 opens a menu with bypass toggles,
+  // restart-planner, version, config list, and a custom `weave>` prompt.
+  await installWeaverMenu();
 
   await openGhostty({ tmuxSession: plannerSession });
   console.log(`\n✓ Ghostty attached. Planner is on the left, bound to project ${project.id}.`);

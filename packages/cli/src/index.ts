@@ -11,6 +11,7 @@ import { runProjectNew, runProjectList, runProjectRemove } from "./commands/proj
 import { runClean } from "./commands/clean.ts";
 import { runConfigGet, runConfigSet, runConfigList, configUsage } from "./commands/config.ts";
 import { runVersion, maybeNotifyUpdate } from "./commands/version.ts";
+import { runRestartPlanner } from "./commands/restart.ts";
 
 const HELP = `weave — coding agent orchestrator
 
@@ -26,6 +27,9 @@ PROJECT LIFECYCLE (a project spans 1..N repos via git worktrees)
                                                 open Ghostty: planner left, N workers in a grid (N: 1-6)
                                                 --bypass — claude --dangerously-skip-permissions
                                                            (also: WEAVER_CLAUDE_BYPASS=1 env, or planner.bypass config)
+  weave restart-planner [--project ID] [--bypass|--no-bypass] [--model M]
+                                                respawn pane 0 with new flags, resume the claude
+                                                session so conversation context is preserved
   weave remove ID [--worktrees]                 delete project (optionally drop worktrees)
 
 CONFIG (defaults read by every weave up / spawn_pane)
@@ -220,6 +224,26 @@ async function main() {
     case "-v":
       await runVersion();
       return;
+
+    case "restart-planner": {
+      const { values } = parseArgs({
+        args: rest,
+        options: {
+          project: { type: "string" },
+          bypass: { type: "boolean" },
+          "no-bypass": { type: "boolean" },
+          model: { type: "string" },
+        },
+        strict: true,
+      });
+      await runRestartPlanner({
+        project: values.project,
+        bypass: values.bypass,
+        noBypass: values["no-bypass"],
+        model: values.model,
+      });
+      return;
+    }
 
     case "doctor": {
       const ok = await runDoctor();

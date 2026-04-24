@@ -5,8 +5,13 @@ import { weavePaths } from "./paths.ts";
 // `weave init`'s first-run wizard populate these.
 
 export type AgentDefaults = {
+  binary?: string;        // executable to launch. Planner default "claude", worker default "codex".
+                          // Change to e.g. "gemini" or "aider" to swap agents. Bypass flag is
+                          // only auto-added for known binaries (claude, codex); other binaries
+                          // must use extraArgs for permission bypass.
   model?: string;         // e.g. "gpt-5-codex-high" for worker, "claude-opus-4-7" for planner
-  bypass?: boolean;       // planner → --dangerously-skip-permissions; worker → --dangerously-bypass-approvals-and-sandbox
+  bypass?: boolean;       // planner+claude → --dangerously-skip-permissions
+                          // worker+codex → --dangerously-bypass-approvals-and-sandbox
   extraArgs?: string;     // appended to the agent command verbatim
 };
 
@@ -42,9 +47,11 @@ export function defaultConfig(): WeaveConfig {
 // Small helpers for dotted-key access from the CLI. Limited to known keys so
 // typos surface immediately instead of silently creating garbage properties.
 const KNOWN_KEYS = [
+  "planner.binary",
   "planner.model",
   "planner.bypass",
   "planner.extraArgs",
+  "worker.binary",
   "worker.model",
   "worker.bypass",
   "worker.extraArgs",
@@ -64,9 +71,11 @@ export function listConfigKeys(): readonly ConfigKey[] {
 
 export function getConfigValue(config: WeaveConfig, key: ConfigKey): unknown {
   switch (key) {
+    case "planner.binary": return config.planner?.binary;
     case "planner.model": return config.planner?.model;
     case "planner.bypass": return config.planner?.bypass;
     case "planner.extraArgs": return config.planner?.extraArgs;
+    case "worker.binary": return config.worker?.binary;
     case "worker.model": return config.worker?.model;
     case "worker.bypass": return config.worker?.bypass;
     case "worker.extraArgs": return config.worker?.extraArgs;
@@ -99,6 +108,9 @@ export function parseConfigValue(key: ConfigKey, raw: string): unknown {
 export function setConfigValue(config: WeaveConfig, key: ConfigKey, value: unknown): WeaveConfig {
   const next = structuredClone(config);
   switch (key) {
+    case "planner.binary":
+      next.planner = { ...(next.planner ?? {}), binary: value as string };
+      break;
     case "planner.model":
       next.planner = { ...(next.planner ?? {}), model: value as string };
       break;
@@ -107,6 +119,9 @@ export function setConfigValue(config: WeaveConfig, key: ConfigKey, value: unkno
       break;
     case "planner.extraArgs":
       next.planner = { ...(next.planner ?? {}), extraArgs: value as string };
+      break;
+    case "worker.binary":
+      next.worker = { ...(next.worker ?? {}), binary: value as string };
       break;
     case "worker.model":
       next.worker = { ...(next.worker ?? {}), model: value as string };
