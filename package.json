@@ -1,6 +1,6 @@
 {
   "name": "weaver",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "private": true,
   "description": "Coding agent orchestrator. A Bun CLI that spawns Codex workers in tmux-under-Ghostty and exposes them to a planner Claude via MCP.",
   "license": "MIT",

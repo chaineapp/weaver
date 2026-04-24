@@ -2,7 +2,10 @@
 
 Coding agent orchestrator. A Bun CLI that spawns Codex CLI workers in tmux panes inside Ghostty and exposes them to a planner Claude session via MCP — so the planner can see, drive, and aggregate N sub-agents without copy-paste.
 
-**Status:** pre-alpha. P1 in progress. See [`docs/plan.md`](./docs/plan.md) for the phased roadmap.
+**Status:** pre-alpha (v0.3.x). See [`docs/plan.md`](./docs/plan.md) for the phased roadmap, [`CHANGELOG.md`](./CHANGELOG.md) for release history, and [`CONTRIBUTING.md`](./CONTRIBUTING.md) for the conventional-commits workflow.
+
+[![CI](https://github.com/chaineapp/weaver/actions/workflows/ci.yml/badge.svg)](https://github.com/chaineapp/weaver/actions/workflows/ci.yml)
+[![Release](https://github.com/chaineapp/weaver/actions/workflows/release.yml/badge.svg)](https://github.com/chaineapp/weaver/actions/workflows/release.yml)
 
 ## Why
 

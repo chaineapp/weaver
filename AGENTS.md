@@ -5,8 +5,10 @@ Read this before writing any code in this repo.
 ## Repo workflow
 
 - **Default branch is `main`. Push directly to main.** No branch protection, no PR requirement for solo work. If collaborating, open a PR but do not stack branch-off-branch.
+- **Conventional Commits are required** — `feat:`, `fix:`, `refactor:`, etc. See [CONTRIBUTING.md](./CONTRIBUTING.md). The release-please workflow parses commit messages to generate CHANGELOG entries and bump versions automatically.
 - Every commit message should explain the *why*, not the *what*. The diff shows what.
 - No CI gate blocks merges, but do not push red. Run `bun test && bun run typecheck` locally first.
+- **Never hand-edit version numbers.** release-please owns every `package.json`'s `version` field. Hand-edits will get clobbered or trigger spurious releases.
 
 ## Stack
 

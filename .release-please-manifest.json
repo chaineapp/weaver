@@ -1,0 +1,8 @@
+{
+  ".": "0.3.0",
+  "packages/codex-adapter": "0.3.0",
+  "packages/core": "0.3.0",
+  "packages/tmux": "0.3.0",
+  "packages/mcp-orchestrator": "0.3.0",
+  "packages/cli": "0.3.0"
+}

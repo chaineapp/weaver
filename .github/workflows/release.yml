@@ -1,0 +1,36 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    outputs:
+      releases_created: ${{ steps.release.outputs.releases_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+    steps:
+      - id: release
+        uses: googleapis/release-please-action@v4
+        with:
+          config-file: .release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+  # Once we publish to npm, wire this up. For now: no-op.
+  # publish:
+  #   needs: release-please
+  #   if: ${{ needs.release-please.outputs.releases_created == 'true' }}
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - uses: oven-sh/setup-bun@v2
+  #     - run: bun install --frozen-lockfile
+  #     - run: bun run build
+  #     - run: bun publish --access public
+  #       env:
+  #         NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
