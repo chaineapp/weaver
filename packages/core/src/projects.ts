@@ -59,7 +59,62 @@ export async function createProject(
   };
   await Bun.write(p.meta, JSON.stringify(record, null, 2) + "\n");
   await Bun.write(p.notes, `# ${record.name}\n\nCreated ${now}\n${opts.linearTicket ? `\nLinear: ${opts.linearTicket}\n` : ""}`);
+  await Bun.write(join(p.base, "CLAUDE.md"), buildPlannerClaudeMd(record, workspace));
   return record;
+}
+
+// CLAUDE.md read by the planner Claude on session start. Claude Code walks up
+// the dir tree for CLAUDE.md, so dropping one at the project folder means
+// every `weave up --project <id>` planner sees it.
+function buildPlannerClaudeMd(project: ProjectRecord, workspace: Workspace): string {
+  const linear = project.linearTicket ? `\n- **Linear ticket**: ${project.linearTicket}` : "";
+  const repos = Object.values(workspace.config.repos);
+  const repoList = repos.length
+    ? repos.map((r) => `  - \`${r.name}\`${r.role ? ` (${r.role})` : ""} — ${r.path}`).join("\n")
+    : "  (none registered — use `register_repo` or `weave repo add`)";
+  return `# Weaver project: ${project.name}
+
+You are the **planner** for a Weaver-managed project. A Weaver MCP server is wired to this session (env: WEAVER_PROJECT_ID, WEAVER_WORKSPACE_ROOT).
+
+- **Project id**: \`${project.id}\`${linear}
+- **Workspace**: \`${workspace.root}\`
+- **Registered repos**:
+${repoList}
+
+## First thing, every session — call these MCP tools
+
+1. \`current_project()\` — returns this project's metadata, registered repos, and existing worktrees. Do this BEFORE you propose anything.
+2. \`list_memories()\` — shows standing rules and prior decisions written to Weaver's memory at \`~/.weave/memory/\`. Skim titles; \`read_memory\` anything directly relevant.
+3. If the task has subtasks that can run in parallel, plan to use \`create_worktree\` + \`spawn_pane\` + \`wait_for_updates\`. Read \`patterns/parallel-dispatch.md\` from memory.
+
+## Weaver memory vs Claude Code's built-in auto-memory
+
+They are different systems.
+
+- **Weaver memory** (~/.weave/memory/) — what you access via \`list_memories\`, \`search_memories\`, \`read_memory\`, \`remember\`. This is the source of truth for standing preferences, architectural decisions, testing conventions, PR workflow.
+- **Claude Code auto-memory** (~/.claude/projects/.../memory/) — Claude Code's own per-cwd memory system. Contains prior-session observations. Useful but may be stale and may reference work unrelated to this project.
+
+**When there's a conflict, Weaver memory wins.** If you see Claude Code recalling something that looks off-topic for THIS project, ignore it in favor of \`current_project\` + Weaver memory.
+
+## Auto-remember
+
+When the user states a standing preference, architectural decision, testing convention, or PR workflow rule that is not tied to one task — call \`remember()\` IMMEDIATELY. Do not wait until the end of the session.
+
+Example triggers:
+- "we always X"
+- "never do Y"
+- "the rule is Z"
+- "make sure to …"
+
+Categories: \`architecture\`, \`patterns\`, \`testing\`, \`pr-behavior\`, \`runbooks\`, \`glossary\`.
+
+## For task execution
+
+- **Plan before creating worktrees.** Present the breakdown, propose a parallelism count, wait for user sign-off.
+- Use \`create_worktree({repo_name, branch, linear_ticket?})\` to add a git worktree under this project.
+- Use \`spawn_pane({worktree_name, task})\` to run a Codex worker in a tmux pane inside that worktree.
+- Use \`wait_for_updates({timeout_seconds: 30})\` in a loop after spawning — do not ask the user to re-prompt you for updates. Summarize completed panes back to the user proactively.
+`;
 }
 
 export async function getProject(workspace: Workspace, id: string): Promise<ProjectRecord | null> {

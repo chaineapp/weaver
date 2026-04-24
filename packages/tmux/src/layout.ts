@@ -19,13 +19,19 @@
 
 import { splitPane } from "./tmux.ts";
 
-export async function buildPlannerLayout(session: string, workers: number): Promise<string[]> {
+export async function buildPlannerLayout(
+  session: string,
+  workers: number,
+  opts: { cwd?: string } = {},
+): Promise<string[]> {
   if (workers < 1 || workers > 6) {
     throw new Error(`workers must be 1..6 (got ${workers})`);
   }
 
+  const cwd = opts.cwd;
+
   // First split: planner keeps the left half, rightRoot is the whole right half.
-  const rightRoot = await splitPane({ target: `${session}:0.0`, direction: "horizontal" });
+  const rightRoot = await splitPane({ target: `${session}:0.0`, direction: "horizontal", cwd });
   const workerPanes: string[] = [];
 
   switch (workers) {
@@ -34,46 +40,41 @@ export async function buildPlannerLayout(session: string, workers: number): Prom
       break;
 
     case 2: {
-      const b = await splitPane({ target: rightRoot, direction: "vertical" });
+      const b = await splitPane({ target: rightRoot, direction: "vertical", cwd });
       workerPanes.push(rightRoot, b);
       break;
     }
 
     case 3: {
-      // top row (2 cols) + bottom row (1 col)
-      const bottom = await splitPane({ target: rightRoot, direction: "vertical" });
-      const topRight = await splitPane({ target: rightRoot, direction: "horizontal" });
+      const bottom = await splitPane({ target: rightRoot, direction: "vertical", cwd });
+      const topRight = await splitPane({ target: rightRoot, direction: "horizontal", cwd });
       workerPanes.push(rightRoot, topRight, bottom);
       break;
     }
 
     case 4: {
-      // 2x2
-      const bottom = await splitPane({ target: rightRoot, direction: "vertical" });
-      const topRight = await splitPane({ target: rightRoot, direction: "horizontal" });
-      const bottomRight = await splitPane({ target: bottom, direction: "horizontal" });
+      const bottom = await splitPane({ target: rightRoot, direction: "vertical", cwd });
+      const topRight = await splitPane({ target: rightRoot, direction: "horizontal", cwd });
+      const bottomRight = await splitPane({ target: bottom, direction: "horizontal", cwd });
       workerPanes.push(rightRoot, topRight, bottom, bottomRight);
       break;
     }
 
     case 5: {
-      // 3 rows: top (2 cols) / middle (2 cols) / bottom (1 col)
-      // Make 3 equal rows by splitting right into thirds.
-      const middle = await splitPane({ target: rightRoot, direction: "vertical", percent: 67 });
-      const bottom = await splitPane({ target: middle, direction: "vertical", percent: 50 });
-      const topRight = await splitPane({ target: rightRoot, direction: "horizontal" });
-      const middleRight = await splitPane({ target: middle, direction: "horizontal" });
+      const middle = await splitPane({ target: rightRoot, direction: "vertical", percent: 67, cwd });
+      const bottom = await splitPane({ target: middle, direction: "vertical", percent: 50, cwd });
+      const topRight = await splitPane({ target: rightRoot, direction: "horizontal", cwd });
+      const middleRight = await splitPane({ target: middle, direction: "horizontal", cwd });
       workerPanes.push(rightRoot, topRight, middle, middleRight, bottom);
       break;
     }
 
     case 6: {
-      // 2x3: three rows of two columns each.
-      const middle = await splitPane({ target: rightRoot, direction: "vertical", percent: 67 });
-      const bottom = await splitPane({ target: middle, direction: "vertical", percent: 50 });
-      const topRight = await splitPane({ target: rightRoot, direction: "horizontal" });
-      const middleRight = await splitPane({ target: middle, direction: "horizontal" });
-      const bottomRight = await splitPane({ target: bottom, direction: "horizontal" });
+      const middle = await splitPane({ target: rightRoot, direction: "vertical", percent: 67, cwd });
+      const bottom = await splitPane({ target: middle, direction: "vertical", percent: 50, cwd });
+      const topRight = await splitPane({ target: rightRoot, direction: "horizontal", cwd });
+      const middleRight = await splitPane({ target: middle, direction: "horizontal", cwd });
+      const bottomRight = await splitPane({ target: bottom, direction: "horizontal", cwd });
       workerPanes.push(rightRoot, topRight, middle, middleRight, bottom, bottomRight);
       break;
     }

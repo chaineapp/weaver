@@ -63,6 +63,28 @@ describe("projects", () => {
     expect(again?.name).toBe("shipment-v2");
     await rm(wsRoot, { recursive: true });
   });
+
+  test("createProject writes a CLAUDE.md priming the planner", async () => {
+    const { initWorkspace, createProject } = await import("../src/index.ts");
+    const wsRoot = await mkdtemp(join(tmpdir(), "weaver-ws-"));
+    const ws = await initWorkspace(wsRoot, [
+      { name: "chain5", path: "/tmp/chain5", role: "backend" },
+    ]);
+    const p = await createProject(ws, { name: "task-a", linearTicket: "CHA-100" });
+    const claudeMd = await Bun.file(
+      join(wsRoot, ".weaver", "projects", p.id, "CLAUDE.md"),
+    ).text();
+    // Primes the planner on the key tools and the project identity.
+    expect(claudeMd).toContain("current_project()");
+    expect(claudeMd).toContain("list_memories()");
+    expect(claudeMd).toContain("remember()");
+    expect(claudeMd).toContain("task-a");
+    expect(claudeMd).toContain("CHA-100");
+    expect(claudeMd).toContain("chain5");
+    // Calls out that Weaver memory beats Claude Code's auto-memory on conflicts.
+    expect(claudeMd).toContain("Weaver memory wins");
+    await rm(wsRoot, { recursive: true });
+  });
 });
 
 describe("worktreeName derivation", () => {

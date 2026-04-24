@@ -36,10 +36,17 @@ export async function runUp(opts: { project?: string; panes: number }): Promise<
   const plannerSession = `weave-${project.id}`;
   const isFresh = !(await hasSession(plannerSession));
 
+  // Run the planner from the project folder so Claude Code picks up the
+  // CLAUDE.md that createProject wrote. The file tells the planner to call
+  // current_project and list_memories at start-of-session, and to prefer
+  // Weaver memory over Claude Code's built-in auto-memory.
+  const { join } = await import("node:path");
+  const plannerCwd = join(ws.weaveDir, "projects", project.id);
+
   if (isFresh) {
     await newSession({
       name: plannerSession,
-      cwd: ws.root,
+      cwd: plannerCwd,
       command: "claude",
       env: {
         WEAVER_WORKSPACE_ROOT: ws.root,
@@ -48,7 +55,7 @@ export async function runUp(opts: { project?: string; panes: number }): Promise<
     });
     console.log(`✓ started planner tmux session ${plannerSession}`);
 
-    const workerPanes = await buildPlannerLayout(plannerSession, opts.panes);
+    const workerPanes = await buildPlannerLayout(plannerSession, opts.panes, { cwd: plannerCwd });
     // Return focus to the planner so the user lands in Claude, not a worker.
     await selectPane(`${plannerSession}:0.0`);
     console.log(`✓ laid out ${workerPanes.length} worker pane(s) on the right (planner on left)`);
