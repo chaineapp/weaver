@@ -21,7 +21,8 @@ ONE-TIME SETUP
   weave repo add NAME PATH [--role R] register a repo in the current workspace
 
 PROJECT LIFECYCLE (a project spans 1..N repos via git worktrees)
-  weave new --name X [--linear CHA-123]         create a project
+  weave new                                     interactive: prompt for name + linear, auto-launch
+  weave new --name X [--linear Y] [--no-up]     non-interactive create
   weave list                                    list projects in current workspace
   weave up [--project ID] [--panes N] [--bypass]
                                                 open Ghostty: planner left, N workers in a grid (N: 1-6)
@@ -111,15 +112,20 @@ async function main() {
     case "new": {
       const { values } = parseArgs({
         args: rest,
-        options: { name: { type: "string" }, linear: { type: "string" } },
+        options: {
+          name: { type: "string" },
+          linear: { type: "string" },
+          "no-up": { type: "boolean" },
+        },
         strict: true,
       });
-      if (!values.name) {
-        console.error("usage: weave new --name <name> [--linear CHA-XXX]");
-        console.error("  name is required — becomes the project folder name under ~/Code/.weaver/projects/");
-        process.exit(1);
-      }
-      await runProjectNew({ name: values.name, linear: values.linear });
+      // No --name → interactive prompt + auto-launch (matches the
+      // "Cmd+T → answer two questions → start coding" flow).
+      await runProjectNew({
+        name: values.name,
+        linear: values.linear,
+        thenUp: values["no-up"] ? false : undefined,
+      });
       return;
     }
 
@@ -144,18 +150,38 @@ async function main() {
     }
 
     case "up": {
-      const { values } = parseArgs({
-        args: rest,
-        options: {
-          project: { type: "string" },
-          panes: { type: "string" },
-          bypass: { type: "boolean" },
-        },
-        strict: true,
-      });
-      const n = values.panes ? Number.parseInt(values.panes, 10) : 2;
+      let values: {
+        project?: string;
+        panes?: string;
+        bypass?: boolean;
+      };
+      try {
+        values = parseArgs({
+          args: rest,
+          options: {
+            project: { type: "string" },
+            panes: { type: "string" },
+            bypass: { type: "boolean" },
+          },
+          strict: true,
+        }).values as typeof values;
+      } catch (err) {
+        console.error(`error: ${(err as Error).message}`);
+        console.error(`usage: weave up [--project ID] [--panes N (1..6)] [--bypass]`);
+        process.exit(1);
+      }
+
+      // If --panes isn't passed, fall back to config.defaultPanes, then 4.
+      let n: number;
+      if (values.panes !== undefined) {
+        n = Number.parseInt(values.panes, 10);
+      } else {
+        const { readConfig } = await import("@weaver/core");
+        const cfg = await readConfig();
+        n = cfg?.defaultPanes ?? 4;
+      }
       if (!Number.isFinite(n) || n < 1 || n > 6) {
-        console.error(`--panes must be 1..6 (got ${values.panes})`);
+        console.error(`--panes must be 1..6 (got ${values.panes ?? n})`);
         process.exit(1);
       }
       await runUp({ project: values.project, panes: n, bypass: values.bypass });

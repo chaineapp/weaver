@@ -1,16 +1,72 @@
+import { createInterface } from "node:readline/promises";
 import { findWorkspace, createProject, listProjects, getProject, teardownProject } from "@weaver/core";
 
-export async function runProjectNew(opts: { name: string; linear?: string }): Promise<void> {
+async function ask(question: string, fallback: string): Promise<string> {
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    const suffix = fallback ? ` [${fallback}]` : "";
+    const ans = (await rl.question(`${question}${suffix}: `)).trim();
+    return ans || fallback;
+  } finally {
+    rl.close();
+  }
+}
+
+// `weave new` with no flags drops into an interactive prompt — name + optional
+// linear ticket — then offers to launch `weave up` immediately, so Cmd+T in
+// a Ghostty tab gives you a one-flow new-project experience.
+export async function runProjectNew(opts: {
+  name?: string;
+  linear?: string;
+  thenUp?: boolean;
+} = {}): Promise<void> {
   const ws = await findWorkspace();
   if (!ws) {
     console.error("not inside a Weaver workspace — run `weave workspace init` first");
     process.exit(1);
   }
-  const p = await createProject(ws, { name: opts.name, linearTicket: opts.linear });
-  console.log(`✓ created project ${p.id}`);
+
+  let name = opts.name;
+  let linear = opts.linear;
+  let interactive = false;
+  if (!name) {
+    interactive = true;
+    if (!process.stdin.isTTY) {
+      console.error("usage: weave new --name <name> [--linear CHA-XXX]");
+      console.error("  (or run interactively in a TTY — this stdin isn't one)");
+      process.exit(1);
+    }
+    name = await ask("project name", "");
+    if (!name) {
+      console.error("project name required");
+      process.exit(1);
+    }
+    if (!linear) {
+      const lin = await ask("linear ticket id (blank to skip)", "");
+      if (lin) linear = lin;
+    }
+  }
+
+  const p = await createProject(ws, { name, linearTicket: linear });
+  console.log(`\n✓ created project ${p.id}`);
   console.log(`  name:     ${p.name}`);
   if (p.linearTicket) console.log(`  linear:   ${p.linearTicket}`);
   console.log(`  location: ${ws.root}/.weaver/projects/${p.id}/`);
+
+  // If invoked interactively, immediately launch the planner in the current
+  // tab — that's the whole point of "Cmd+T → answer two questions → coding".
+  // --then-up=false to opt out.
+  const shouldUp = opts.thenUp ?? interactive;
+  if (shouldUp) {
+    const { runUp } = await import("./up.ts");
+    const { readConfig } = await import("@weaver/core");
+    const cfg = await readConfig();
+    const panes = cfg?.defaultPanes ?? 4;
+    console.log(`\n→ launching planner with ${panes} worker pane(s)...\n`);
+    await runUp({ project: p.id, panes });
+    return;
+  }
+
   console.log(`\nNext:  weave up --project ${p.id} --panes 4   (planner + 2x2 worker grid on right)`);
 }
 

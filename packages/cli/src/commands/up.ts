@@ -1,5 +1,6 @@
 import { findWorkspace, getProject, listProjects, readConfig } from "@weaver/core";
-import { hasSession, newSession, listPanes, openGhostty, buildPlannerLayout, selectPane, setStatusLeft, installWeaverMenu } from "@weaver/tmux";
+import { hasSession, newSession, listPanes, openGhostty, openGhosttyTab, isInsideGhostty, buildPlannerLayout, selectPane, setStatusLeft, installWeaverMenu } from "@weaver/tmux";
+import { playBanner } from "../banner.ts";
 
 // Build the command string used to launch the planner agent inside tmux.
 // Exported for unit-testing — avoids re-running the whole CLI to check flags.
@@ -28,6 +29,7 @@ export function buildPlannerCommand(opts: {
 // always in addition. So --panes 4 gives you: 1 planner + 2x2 workers.
 
 export async function runUp(opts: { project?: string; panes: number; bypass?: boolean }): Promise<void> {
+  await playBanner("weaver — coding agent orchestrator");
   const ws = await findWorkspace();
   if (!ws) {
     console.error("not inside a Weaver workspace — run `weave workspace init` first");
@@ -105,7 +107,29 @@ export async function runUp(opts: { project?: string; panes: number; bypass?: bo
   // restart-planner, version, config list, and a custom `weave>` prompt.
   await installWeaverMenu();
 
-  await openGhostty({ tmuxSession: plannerSession });
-  console.log(`\n✓ Ghostty attached. Planner is on the left, bound to project ${project.id}.`);
+  // If we're already inside a Ghostty terminal, open this project as a TAB
+  // in the current window — keeps everything in one window, tab title shows
+  // the project name. Falls back to a new window if AppleScript can't drive
+  // Ghostty (e.g. no Accessibility permission).
+  let opened: "tab" | "window" = "window";
+  if (isInsideGhostty()) {
+    const tabOk = await openGhosttyTab({
+      tmuxSession: plannerSession,
+      title: project.name,
+    });
+    if (tabOk) opened = "tab";
+  }
+  if (opened === "window") {
+    await openGhostty({ tmuxSession: plannerSession });
+  }
+
+  console.log(
+    `\n✓ Ghostty ${opened === "tab" ? "tab opened" : "window opened"} for ${project.name} (${project.id}).`,
+  );
   console.log(`  MCP context: workspace=${ws.root}, project=${project.id}`);
+  if (opened === "window" && isInsideGhostty()) {
+    console.log(
+      `  (couldn't open as a tab — grant Ghostty Accessibility permission in System Settings to enable tabs)`,
+    );
+  }
 }
