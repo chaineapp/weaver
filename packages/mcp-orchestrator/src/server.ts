@@ -18,6 +18,12 @@ import {
   KillPaneInput,
   PaneSummaryInput,
   WaitForUpdatesInput,
+  ListMemoriesInput,
+  ReadMemoryInput,
+  SearchMemoriesInput,
+  RecentMemoriesInput,
+  RememberInput,
+  ForgetInput,
   currentProject,
   listProjectsTool,
   newProject,
@@ -32,6 +38,12 @@ import {
   killPaneTool,
   paneSummaryTool,
   waitForUpdatesTool,
+  listMemoriesTool,
+  readMemoryTool,
+  searchMemoriesTool,
+  recentMemoriesTool,
+  rememberTool,
+  forgetTool,
 } from "./tools.ts";
 
 const TOOLS = [
@@ -118,6 +130,42 @@ const TOOLS = [
     description: "Block until any pane emits new JSONL events past its review cursor, or timeout. THE planner's auto-loop primitive. Defaults to watching only panes in the current project.",
     inputSchema: WaitForUpdatesInput,
     handler: waitForUpdatesTool,
+  },
+  {
+    name: "list_memories",
+    description: "List memory files under ~/.weave/memory/. Filter by category or tag. Read these at session start to orient — they hold the user's standing preferences, architectural decisions, testing conventions, PR workflow rules.",
+    inputSchema: ListMemoriesInput,
+    handler: listMemoriesTool,
+  },
+  {
+    name: "read_memory",
+    description: "Read a specific memory file (path relative to ~/.weave/memory/).",
+    inputSchema: ReadMemoryInput,
+    handler: readMemoryTool,
+  },
+  {
+    name: "search_memories",
+    description: "Plain-text search across memory files. Use before you assume something — the user may have already stated a preference.",
+    inputSchema: SearchMemoriesInput,
+    handler: searchMemoriesTool,
+  },
+  {
+    name: "recent_memories",
+    description: "N most recently updated memories (default 10).",
+    inputSchema: RecentMemoriesInput,
+    handler: recentMemoriesTool,
+  },
+  {
+    name: "remember",
+    description: "Save a durable fact to ~/.weave/memory/<category>/<slug>.md. Call this IMMEDIATELY when the user states a preference, architectural decision, naming rule, testing convention, or workflow expectation that isn't tied to a single task — anything you'd otherwise need the user to repeat next session. Categories: architecture, patterns, testing, pr-behavior, runbooks, glossary, sessions.",
+    inputSchema: RememberInput,
+    handler: rememberTool,
+  },
+  {
+    name: "forget",
+    description: "Delete a memory file by path. Use when the user explicitly says to forget something, or a memory has been superseded.",
+    inputSchema: ForgetInput,
+    handler: forgetTool,
   },
 ] as const;
 

@@ -14,6 +14,13 @@ import {
   removeWorktree,
   addRepo,
   findWorkspace,
+  listMemories,
+  readMemory,
+  searchMemories,
+  recentMemories,
+  remember,
+  forget,
+  CATEGORIES,
 } from "@weaver/core";
 import { sendKeys, killPane } from "@weaver/tmux";
 import { requireProject, type Context } from "./context.ts";
@@ -239,3 +246,92 @@ export async function waitForUpdatesTool(ctx: Context, input: z.infer<typeof Wai
 
 // Re-export findWorkspace so callers of context.ts can rehydrate, for symmetry.
 export { findWorkspace };
+
+// ---------- Memory ----------
+
+export const ListMemoriesInput = z.object({
+  category: z.enum(CATEGORIES as unknown as [string, ...string[]]).optional(),
+  tag: z.string().optional(),
+});
+
+export const ReadMemoryInput = z.object({
+  path: z.string().describe("Path relative to ~/.weave/memory/, e.g. 'architecture/service-boundaries.md'."),
+});
+
+export const SearchMemoriesInput = z.object({
+  query: z.string(),
+  category: z.enum(CATEGORIES as unknown as [string, ...string[]]).optional(),
+});
+
+export const RecentMemoriesInput = z.object({
+  limit: z.number().int().positive().max(50).optional(),
+  category: z.enum(CATEGORIES as unknown as [string, ...string[]]).optional(),
+});
+
+export const RememberInput = z.object({
+  category: z
+    .enum(CATEGORIES as unknown as [string, ...string[]])
+    .describe("Which folder the memory goes in. Pick the most specific fit."),
+  title: z.string().min(1).describe("Short claim-style title. Becomes the filename (slugified)."),
+  body: z.string().min(1).describe("Markdown. Prefer: 1) the rule itself, 2) why, 3) when to apply."),
+  tags: z.array(z.string()).optional(),
+  status: z.enum(["draft", "canonical", "deprecated"]).optional(),
+});
+
+export const ForgetInput = z.object({ path: z.string() });
+
+export async function listMemoriesTool(_ctx: Context, input: z.infer<typeof ListMemoriesInput>) {
+  const items = await listMemories({ category: input.category, tag: input.tag });
+  return {
+    memories: items.map((m) => ({
+      path: m.path,
+      title: m.frontmatter.title,
+      category: m.frontmatter.category,
+      tags: m.frontmatter.tags,
+      status: m.frontmatter.status,
+      updated: m.frontmatter.updated,
+    })),
+  };
+}
+
+export async function readMemoryTool(_ctx: Context, input: z.infer<typeof ReadMemoryInput>) {
+  const m = await readMemory(input.path);
+  if (!m) throw new Error(`memory not found: ${input.path}`);
+  return { path: m.path, frontmatter: m.frontmatter, body: m.body };
+}
+
+export async function searchMemoriesTool(_ctx: Context, input: z.infer<typeof SearchMemoriesInput>) {
+  const hits = await searchMemories(input.query, { category: input.category });
+  return { query: input.query, hits };
+}
+
+export async function recentMemoriesTool(_ctx: Context, input: z.infer<typeof RecentMemoriesInput>) {
+  const items = await recentMemories({ limit: input.limit, category: input.category });
+  return {
+    memories: items.map((m) => ({
+      path: m.path,
+      title: m.frontmatter.title,
+      category: m.frontmatter.category,
+      tags: m.frontmatter.tags,
+      status: m.frontmatter.status,
+      updated: m.frontmatter.updated,
+    })),
+  };
+}
+
+export async function rememberTool(_ctx: Context, input: z.infer<typeof RememberInput>) {
+  const m = await remember(input);
+  return {
+    ok: true,
+    path: m.path,
+    title: m.frontmatter.title,
+    category: m.frontmatter.category,
+    status: m.frontmatter.status,
+    note: `Saved to ~/.weave/memory/${m.path}. Future planners will see it via list/search/read.`,
+  };
+}
+
+export async function forgetTool(_ctx: Context, input: z.infer<typeof ForgetInput>) {
+  const ok = await forget(input.path);
+  return { ok, path: input.path };
+}
