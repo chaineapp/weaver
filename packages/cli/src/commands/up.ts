@@ -1,10 +1,14 @@
-import { findWorkspace, getProject, listProjects } from "@weaver/core";
+import { findWorkspace, getProject, listProjects, readConfig } from "@weaver/core";
 import { hasSession, newSession, listPanes, openGhostty, buildPlannerLayout, selectPane, setStatusLeft } from "@weaver/tmux";
 
 // Build the command string used to launch the planner Claude inside tmux.
 // Exported for unit-testing — avoids re-running the whole CLI to check flags.
-export function buildPlannerCommand(opts: { bypass?: boolean } = {}): string {
-  return opts.bypass ? "claude --dangerously-skip-permissions" : "claude";
+export function buildPlannerCommand(opts: { bypass?: boolean; model?: string; extraArgs?: string } = {}): string {
+  const parts = ["claude"];
+  if (opts.bypass) parts.push("--dangerously-skip-permissions");
+  if (opts.model) parts.push("--model", opts.model);
+  if (opts.extraArgs) parts.push(opts.extraArgs);
+  return parts.join(" ");
 }
 
 // `weave up --project <id> --panes <workers>`:
@@ -49,10 +53,13 @@ export async function runUp(opts: { project?: string; panes: number; bypass?: bo
   const { join } = await import("node:path");
   const plannerCwd = join(ws.weaveDir, "projects", project.id);
 
-  // Honor WEAVER_CLAUDE_BYPASS=1 from the user's shell env as a persistent default.
+  // Resolve planner flags. Precedence: explicit --bypass flag > WEAVER_CLAUDE_BYPASS env > ~/.weave/config.json > off.
+  const cfg = await readConfig();
   const envBypass = process.env.WEAVER_CLAUDE_BYPASS === "1";
-  const bypass = opts.bypass ?? envBypass;
-  const plannerCmd = buildPlannerCommand({ bypass });
+  const bypass = opts.bypass ?? envBypass ?? cfg?.planner?.bypass ?? false;
+  const model = cfg?.planner?.model;
+  const extraArgs = cfg?.planner?.extraArgs;
+  const plannerCmd = buildPlannerCommand({ bypass, model, extraArgs });
 
   if (isFresh) {
     await newSession({
@@ -77,10 +84,11 @@ export async function runUp(opts: { project?: string; panes: number; bypass?: bo
     await selectPane(`${plannerSession}:0.0`);
   }
 
-  // Always refresh the status bar — the project name or linear ticket may have
-  // changed since the session was first created.
+  // Status bar: project name + linear ticket + active flags so the user can
+  // see at a glance whether bypass is on. Refreshed on every `weave up`.
   const ticket = project.linearTicket ? ` | ${project.linearTicket}` : "";
-  await setStatusLeft(plannerSession, ` weaver | ${project.name}${ticket} `);
+  const flags = bypass ? " | bypass" : "";
+  await setStatusLeft(plannerSession, ` weaver | ${project.name}${ticket}${flags} `);
 
   await openGhostty({ tmuxSession: plannerSession });
   console.log(`\n✓ Ghostty attached. Planner is on the left, bound to project ${project.id}.`);

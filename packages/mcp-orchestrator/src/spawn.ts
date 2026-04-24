@@ -1,5 +1,5 @@
 import { splitPane, sendKeys, pipePane, newSession, hasSession } from "@weaver/tmux";
-import { weavePaths, upsertPaneRecord, type PaneRecord, type WorktreeRecord, type ProjectRecord, type Workspace } from "@weaver/core";
+import { weavePaths, upsertPaneRecord, readConfig, type PaneRecord, type WorktreeRecord, type ProjectRecord, type Workspace } from "@weaver/core";
 
 export type SpawnOptions = {
   workspace: Workspace;
@@ -24,7 +24,14 @@ export async function spawnWorker(opts: SpawnOptions): Promise<PaneRecord> {
 
   const runFile = weavePaths().runFile(paneId);
   await pipePane(paneId, runFile);
-  await sendKeys(paneId, buildCodexCommand(opts.task, opts.model));
+
+  // Resolve worker defaults from ~/.weave/config.json. spawn_pane's model arg
+  // overrides config; bypass + extraArgs come from config unconditionally.
+  const cfg = await readConfig();
+  const model = opts.model ?? cfg?.worker?.model;
+  const bypass = cfg?.worker?.bypass ?? false;
+  const extraArgs = cfg?.worker?.extraArgs;
+  await sendKeys(paneId, buildCodexCommand(opts.task, { model, bypass, extraArgs }));
 
   const now = new Date().toISOString();
   const record: PaneRecord = {
@@ -45,9 +52,16 @@ export async function spawnWorker(opts: SpawnOptions): Promise<PaneRecord> {
   return record;
 }
 
-function buildCodexCommand(task: string, model?: string): string {
-  const modelFlag = model ? ` --model ${shellQuote(model)}` : "";
-  return `codex exec --json${modelFlag} ${shellQuote(task)}`;
+export function buildCodexCommand(
+  task: string,
+  opts: { model?: string; bypass?: boolean; extraArgs?: string } = {},
+): string {
+  const parts = ["codex", "exec", "--json"];
+  if (opts.bypass) parts.push("--dangerously-bypass-approvals-and-sandbox");
+  if (opts.model) parts.push("--model", shellQuote(opts.model));
+  if (opts.extraArgs) parts.push(opts.extraArgs);
+  parts.push(shellQuote(task));
+  return parts.join(" ");
 }
 
 function shellQuote(s: string): string {

@@ -9,37 +9,56 @@ import { runKill } from "./commands/kill.ts";
 import { runWorkspaceInit, runRepoAdd, runRepoList } from "./commands/workspace.ts";
 import { runProjectNew, runProjectList, runProjectRemove } from "./commands/project.ts";
 import { runClean } from "./commands/clean.ts";
+import { runConfigGet, runConfigSet, runConfigList, configUsage } from "./commands/config.ts";
+import { runVersion, maybeNotifyUpdate } from "./commands/version.ts";
 
 const HELP = `weave — coding agent orchestrator
 
-One-time setup:
-  weave init                          create ~/.weave/ and register MCP globally
+ONE-TIME SETUP
+  weave init                          create ~/.weave/, register MCP, run preferences wizard
   weave workspace init [PATH]         mark a code dir (default cwd) as a workspace
   weave repo add NAME PATH [--role R] register a repo in the current workspace
 
-Project lifecycle (a project spans 1..N repos via git worktrees):
-  weave new [--name X] [--linear CHA-123]   create a project
-  weave list                                list projects in current workspace
+PROJECT LIFECYCLE (a project spans 1..N repos via git worktrees)
+  weave new --name X [--linear CHA-123]         create a project
+  weave list                                    list projects in current workspace
   weave up [--project ID] [--panes N] [--bypass]
-                                            open Ghostty: planner left, N workers in a grid (N: 1-6)
-                                            --bypass: launch claude with --dangerously-skip-permissions
-                                            (or export WEAVER_CLAUDE_BYPASS=1 to make it default)
-  weave remove ID [--worktrees]             delete project (optionally drop worktrees)
+                                                open Ghostty: planner left, N workers in a grid (N: 1-6)
+                                                --bypass — claude --dangerously-skip-permissions
+                                                           (also: WEAVER_CLAUDE_BYPASS=1 env, or planner.bypass config)
+  weave remove ID [--worktrees]                 delete project (optionally drop worktrees)
 
-Inspection:
+CONFIG (defaults read by every weave up / spawn_pane)
+  weave config list                             show all keys + current values
+  weave config get KEY                          print one value
+  weave config set KEY VALUE                    persist a default
+                                                keys: planner.bypass, planner.model, planner.extraArgs,
+                                                      worker.bypass, worker.model, worker.extraArgs,
+                                                      defaultPanes, defaultWaitTimeoutSeconds
+
+INSPECTION
   weave repos                         list registered repos
   weave panes [--project ID]          list Codex worker panes
   weave kill <pane_id>                kill a worker pane
   weave clean                         wipe all panes, run files, weave-* tmux sessions
+  weave version                       current version + check GitHub for updates
 
-Internal (invoked by Claude Code):
-  weave mcp                           start the MCP stdio server
+INTERNAL
+  weave mcp                           start the MCP stdio server (invoked by Claude Code)
   weave doctor                        check required binaries
+  weave migrate <path>                clean up legacy v0.1 per-project .weave/
 `;
 
 const [, , cmd, ...rest] = process.argv;
 
 async function main() {
+  // Best-effort update check on every user-facing command. Silent on network
+  // failure. Skipped for internal subcommands where output would pollute
+  // machine-consumed stdout.
+  if (cmd && !["mcp", "doctor", "-v", "--version", "version"].includes(cmd)) {
+    await maybeNotifyUpdate();
+  }
+
   switch (cmd) {
     case undefined:
     case "-h":
@@ -165,6 +184,41 @@ async function main() {
 
     case "clean":
       await runClean();
+      return;
+
+    case "config": {
+      const sub = rest[0];
+      if (sub === "list") {
+        await runConfigList();
+        return;
+      }
+      if (sub === "get") {
+        const key = rest[1];
+        if (!key) {
+          console.error("usage: weave config get <key>");
+          process.exit(1);
+        }
+        await runConfigGet(key);
+        return;
+      }
+      if (sub === "set") {
+        const key = rest[1];
+        const value = rest.slice(2).join(" ");
+        if (!key || !value) {
+          console.error("usage: weave config set <key> <value>");
+          process.exit(1);
+        }
+        await runConfigSet(key, value);
+        return;
+      }
+      console.error(configUsage());
+      process.exit(1);
+    }
+
+    case "version":
+    case "--version":
+    case "-v":
+      await runVersion();
       return;
 
     case "doctor": {

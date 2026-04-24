@@ -1,5 +1,6 @@
 import { initWeave, weavePaths } from "@weaver/core";
 import { writeSeedPlaybooks } from "./seed.ts";
+import { runFirstRunWizard } from "./wizard.ts";
 
 export async function runInit(_opts: { force?: boolean }): Promise<void> {
   const p = weavePaths();
@@ -8,6 +9,7 @@ export async function runInit(_opts: { force?: boolean }): Promise<void> {
 
   if (firstRun) {
     console.log(`✓ initialized ~/.weave/ (first run)`);
+    await runFirstRunWizard();
   } else {
     console.log(`✓ ~/.weave/ already initialized`);
   }
