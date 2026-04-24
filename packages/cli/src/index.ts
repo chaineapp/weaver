@@ -20,7 +20,7 @@ One-time setup:
 Project lifecycle (a project spans 1..N repos via git worktrees):
   weave new [--name X] [--linear CHA-123]   create a project
   weave list                                list projects in current workspace
-  weave up [--project ID] [--panes N]       open Ghostty with planner bound to project
+  weave up [--project ID] [--panes N]       open Ghostty: planner left, N workers in a grid on right (N: 1-6)
   weave remove ID [--worktrees]             delete project (optionally drop worktrees)
 
 Inspection:

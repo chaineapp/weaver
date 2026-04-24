@@ -1,13 +1,13 @@
 import { findWorkspace, getProject, listProjects } from "@weaver/core";
-import { hasSession, newSession, splitPane, listPanes, openGhostty } from "@weaver/tmux";
+import { hasSession, newSession, listPanes, openGhostty, buildPlannerLayout } from "@weaver/tmux";
 
-// `weave up --project <id>` starts a planner session for a project:
-//   - tmux session: weave-<projectId> (separate from worktree sessions)
-//   - pane 0 runs `claude` with WEAVER_WORKSPACE_ROOT + WEAVER_PROJECT_ID env
-//   - Ghostty attaches to it
+// `weave up --project <id> --panes <workers>`:
+//   - creates tmux session weave-<id> if missing, pane 0 runs `claude`
+//   - builds a planner-left + workers-grid-right layout on first creation
+//   - opens Ghostty attached to the session
 //
-// Worker panes (codex) run in *worktree* tmux sessions named
-// weave-<projectId>-<worktree>, spawned on demand by create_worktree + spawn_pane.
+// --panes N = number of WORKER panes on the right (1..6). The planner is
+// always in addition. So --panes 4 gives you: 1 planner + 2x2 workers.
 
 export async function runUp(opts: { project?: string; panes: number }): Promise<void> {
   const ws = await findWorkspace();
@@ -18,7 +18,6 @@ export async function runUp(opts: { project?: string; panes: number }): Promise<
 
   let projectId = opts.project;
   if (!projectId) {
-    // Default to the most recent project.
     const all = await listProjects(ws);
     if (all.length === 0) {
       console.error("no projects yet — `weave new` to create one");
@@ -35,8 +34,9 @@ export async function runUp(opts: { project?: string; panes: number }): Promise<
   }
 
   const plannerSession = `weave-${project.id}`;
+  const isFresh = !(await hasSession(plannerSession));
 
-  if (!(await hasSession(plannerSession))) {
+  if (isFresh) {
     await newSession({
       name: plannerSession,
       cwd: ws.root,
@@ -47,18 +47,15 @@ export async function runUp(opts: { project?: string; panes: number }): Promise<
       },
     });
     console.log(`✓ started planner tmux session ${plannerSession}`);
-  } else {
-    console.log(`✓ planner tmux session ${plannerSession} already running`);
-  }
 
-  const existing = await listPanes(plannerSession);
-  const needed = opts.panes - existing.length;
-  for (let i = 0; i < needed; i++) {
-    const paneId = await splitPane({ target: plannerSession, direction: "vertical", cwd: ws.root });
-    console.log(`  + split pane ${paneId} (scratch — the planner drives workers via MCP)`);
+    const workerPanes = await buildPlannerLayout(plannerSession, opts.panes);
+    console.log(`✓ laid out ${workerPanes.length} worker pane(s) on the right (planner on left)`);
+  } else {
+    const existing = await listPanes(plannerSession);
+    console.log(`✓ planner tmux session ${plannerSession} already running (${existing.length} pane(s))`);
   }
 
   await openGhostty({ tmuxSession: plannerSession });
-  console.log(`\n✓ Ghostty attached. Planner is in pane 0 (claude), bound to project ${project.id}.`);
-  console.log(`  MCP tools see: workspace=${ws.root}, project=${project.id}`);
+  console.log(`\n✓ Ghostty attached. Planner is on the left, bound to project ${project.id}.`);
+  console.log(`  MCP context: workspace=${ws.root}, project=${project.id}`);
 }

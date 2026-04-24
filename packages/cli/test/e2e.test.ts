@@ -231,12 +231,11 @@ describe("weave CLI e2e", () => {
     const { openGhostty } = await import("@weaver/tmux");
     const originalSpawn = Bun.spawn;
     const calls: string[][] = [];
-    (Bun as unknown as { spawn: unknown }).spawn = ((
-      cmd: string[],
-      ...rest: unknown[]
-    ) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (Bun as unknown as { spawn: unknown }).spawn = ((cmd: string[], options?: unknown) => {
       calls.push(cmd);
-      return originalSpawn(cmd, ...(rest as Parameters<typeof originalSpawn>));
+      // @ts-expect-error — Bun.spawn has overloaded signatures; pass-through is correct at runtime.
+      return originalSpawn(cmd, options);
     }) as typeof Bun.spawn;
 
     try {

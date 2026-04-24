@@ -11,7 +11,7 @@ export async function runProjectNew(opts: { name?: string; linear?: string }): P
   console.log(`  name:     ${p.name}`);
   if (p.linearTicket) console.log(`  linear:   ${p.linearTicket}`);
   console.log(`  location: ${ws.root}/.weaver/projects/${p.id}/`);
-  console.log(`\nNext:  weave up --project ${p.id} --panes 4`);
+  console.log(`\nNext:  weave up --project ${p.id} --panes 4   (planner + 2x2 worker grid on right)`);
 }
 
 export async function runProjectList(): Promise<void> {
