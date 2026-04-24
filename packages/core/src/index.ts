@@ -7,3 +7,4 @@ export * from "./runs.ts";
 export * from "./updates.ts";
 export * from "./init.ts";
 export * from "./ids.ts";
+export * from "./cleanup.ts";

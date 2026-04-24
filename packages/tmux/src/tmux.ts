@@ -50,11 +50,20 @@ export async function newSession(opts: {
   cwd?: string;
   detached?: boolean;
   command?: string;
+  env?: Record<string, string>;
 }): Promise<void> {
   const args = ["new-session"];
   if (opts.detached !== false) args.push("-d");
   args.push("-s", opts.name);
   if (opts.cwd) args.push("-c", opts.cwd);
+  // tmux -e VAR=val sets env vars for the session's processes. Cleaner than
+  // shell-prefixing the command string (which requires the command to be
+  // interpreted by a shell, and fails silently if the shell config misbehaves).
+  if (opts.env) {
+    for (const [k, v] of Object.entries(opts.env)) {
+      args.push("-e", `${k}=${v}`);
+    }
+  }
   if (opts.command) args.push(opts.command);
   await runOrThrow(args);
 }

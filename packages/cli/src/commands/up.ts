@@ -37,14 +37,14 @@ export async function runUp(opts: { project?: string; panes: number }): Promise<
   const plannerSession = `weave-${project.id}`;
 
   if (!(await hasSession(plannerSession))) {
-    const env = [
-      `WEAVER_WORKSPACE_ROOT=${ws.root}`,
-      `WEAVER_PROJECT_ID=${project.id}`,
-    ].join(" ");
     await newSession({
       name: plannerSession,
       cwd: ws.root,
-      command: `${env} claude`,
+      command: "claude",
+      env: {
+        WEAVER_WORKSPACE_ROOT: ws.root,
+        WEAVER_PROJECT_ID: project.id,
+      },
     });
     console.log(`✓ started planner tmux session ${plannerSession}`);
   } else {
@@ -58,7 +58,7 @@ export async function runUp(opts: { project?: string; panes: number }): Promise<
     console.log(`  + split pane ${paneId} (scratch — the planner drives workers via MCP)`);
   }
 
-  await openGhostty({ tmuxSession: plannerSession, cwd: ws.root });
+  await openGhostty({ tmuxSession: plannerSession });
   console.log(`\n✓ Ghostty attached. Planner is in pane 0 (claude), bound to project ${project.id}.`);
   console.log(`  MCP tools see: workspace=${ws.root}, project=${project.id}`);
 }

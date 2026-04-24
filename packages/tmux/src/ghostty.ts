@@ -1,16 +1,14 @@
-// Ghostty integration. We keep this small: Weaver's programmable surface is
-// tmux, not AppleScript. Ghostty is just the visible terminal window that
-// attaches to a tmux session.
+// Ghostty integration. Keep this minimal: Weaver's programmable surface is
+// tmux, not Ghostty. Ghostty is just the visible terminal that attaches to a
+// tmux session.
 
-export async function openGhostty(opts: { tmuxSession: string; cwd?: string }): Promise<void> {
+export async function openGhostty(opts: { tmuxSession: string }): Promise<void> {
   // macOS: `open -na Ghostty --args -e "tmux attach -t <session>"`.
-  // Ghostty's `-e` flag executes the command in a new window.
+  // Do NOT pass --working-directory after -e — Ghostty's arg parser consumes
+  // everything after -e as part of the command, so late flags end up appended
+  // to the tmux invocation.
   const attachCmd = `tmux attach -t ${shellQuote(opts.tmuxSession)}`;
   const args = ["-na", "Ghostty", "--args", "-e", attachCmd];
-  if (opts.cwd) {
-    // Ghostty's working-directory flag
-    args.push("--working-directory", opts.cwd);
-  }
   const proc = Bun.spawn(["open", ...args], { stdout: "pipe", stderr: "pipe" });
   const code = await proc.exited;
   if (code !== 0) {

@@ -1,4 +1,4 @@
-import { findWorkspace, createProject, listProjects, getProject, deleteProject } from "@weaver/core";
+import { findWorkspace, createProject, listProjects, getProject, teardownProject } from "@weaver/core";
 
 export async function runProjectNew(opts: { name?: string; linear?: string }): Promise<void> {
   const ws = await findWorkspace();
@@ -43,6 +43,9 @@ export async function runProjectRemove(opts: { id: string; removeWorktrees?: boo
     console.error(`no project with id ${opts.id}`);
     process.exit(1);
   }
-  await deleteProject(ws, opts.id, { removeWorktrees: opts.removeWorktrees });
-  console.log(`✓ removed project ${opts.id}${opts.removeWorktrees ? " (+ worktrees)" : ""}`);
+  const result = await teardownProject(ws, opts.id, { removeWorktrees: opts.removeWorktrees });
+  console.log(`✓ removed project ${opts.id}`);
+  console.log(`  tmux sessions killed: ${result.tmuxSessionsKilled.length}`);
+  console.log(`  panes removed:        ${result.panesRemoved.length}`);
+  if (opts.removeWorktrees) console.log(`  worktrees removed:    ${result.worktreesRemoved.length}`);
 }

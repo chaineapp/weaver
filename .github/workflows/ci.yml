@@ -13,6 +13,12 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: latest
+      - name: Install tmux
+        run: brew install tmux
+      - name: Install git user (for worktree e2e tests)
+        run: |
+          git config --global user.email ci@weaver.test
+          git config --global user.name "CI"
       - run: bun install --frozen-lockfile
       - run: bun run typecheck
       - run: bun test

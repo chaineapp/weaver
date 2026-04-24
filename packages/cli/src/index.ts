@@ -8,6 +8,7 @@ import { runPanes } from "./commands/panes.ts";
 import { runKill } from "./commands/kill.ts";
 import { runWorkspaceInit, runRepoAdd, runRepoList } from "./commands/workspace.ts";
 import { runProjectNew, runProjectList, runProjectRemove } from "./commands/project.ts";
+import { runClean } from "./commands/clean.ts";
 
 const HELP = `weave — coding agent orchestrator
 
@@ -26,6 +27,7 @@ Inspection:
   weave repos                         list registered repos
   weave panes [--project ID]          list Codex worker panes
   weave kill <pane_id>                kill a worker pane
+  weave clean                         wipe all panes, run files, weave-* tmux sessions
 
 Internal (invoked by Claude Code):
   weave mcp                           start the MCP stdio server
@@ -147,6 +149,10 @@ async function main() {
 
     case "mcp":
       await runMcp();
+      return;
+
+    case "clean":
+      await runClean();
       return;
 
     case "doctor": {
