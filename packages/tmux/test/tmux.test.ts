@@ -1,5 +1,27 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test, beforeAll, afterAll } from "bun:test";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { tmuxVersion, hasSession, newSession, killSession, splitPane, sendKeys, listPanes, killPane } from "../src/tmux.ts";
+
+// See e2e.test.ts for the rationale — isolate tmux socket so tests can't
+// enumerate or kill the user's real sessions.
+let tmuxTmpdir: string;
+let originalTmuxTmpdir: string | undefined;
+
+beforeAll(async () => {
+  tmuxTmpdir = await mkdtemp(join(tmpdir(), "weaver-tmux-test-"));
+  originalTmuxTmpdir = process.env.TMUX_TMPDIR;
+  process.env.TMUX_TMPDIR = tmuxTmpdir;
+});
+
+afterAll(async () => {
+  const p = Bun.spawn(["tmux", "kill-server"], { stdout: "pipe", stderr: "pipe" });
+  await p.exited;
+  if (originalTmuxTmpdir === undefined) delete process.env.TMUX_TMPDIR;
+  else process.env.TMUX_TMPDIR = originalTmuxTmpdir;
+  await rm(tmuxTmpdir, { recursive: true, force: true });
+});
 
 const hasTmux = (await tmuxVersion()) !== null;
 const sessionName = `weaver-test-${process.pid}`;

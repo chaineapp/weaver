@@ -1,4 +1,7 @@
-import { describe, expect, test, afterEach } from "bun:test";
+import { describe, expect, test, beforeAll, afterAll, afterEach } from "bun:test";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   tmuxVersion,
   hasSession,
@@ -7,6 +10,24 @@ import {
   listPanes,
   buildPlannerLayout,
 } from "../src/index.ts";
+
+// Isolate from user's tmux server — see e2e.test.ts for the full rationale.
+let tmuxTmpdir: string;
+let originalTmuxTmpdir: string | undefined;
+
+beforeAll(async () => {
+  tmuxTmpdir = await mkdtemp(join(tmpdir(), "weaver-layout-test-"));
+  originalTmuxTmpdir = process.env.TMUX_TMPDIR;
+  process.env.TMUX_TMPDIR = tmuxTmpdir;
+});
+
+afterAll(async () => {
+  const p = Bun.spawn(["tmux", "kill-server"], { stdout: "pipe", stderr: "pipe" });
+  await p.exited;
+  if (originalTmuxTmpdir === undefined) delete process.env.TMUX_TMPDIR;
+  else process.env.TMUX_TMPDIR = originalTmuxTmpdir;
+  await rm(tmuxTmpdir, { recursive: true, force: true });
+});
 
 const hasTmux = (await tmuxVersion()) !== null;
 const createdSessions: string[] = [];

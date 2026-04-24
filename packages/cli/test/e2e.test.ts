@@ -10,6 +10,14 @@ import { existsSync } from "node:fs";
 
 const WEAVE_CLI = join(import.meta.dir, "..", "src", "index.ts");
 
+// CRITICAL: tmux's socket lives at $TMUX_TMPDIR/tmux-<uid>/default. Without
+// isolation, a test invoking `weave clean` or `tmux list-sessions` would
+// see the real user's sessions and could kill them. We set TMUX_TMPDIR on
+// the process so every tmux invocation — direct or via @weaver/tmux —
+// inherits a sandboxed socket.
+let tmuxTmpdir: string;
+let originalTmuxTmpdir: string | undefined;
+
 type RunResult = { stdout: string; stderr: string; code: number };
 
 async function runWeave(
@@ -18,6 +26,7 @@ async function runWeave(
 ): Promise<RunResult> {
   const proc = Bun.spawn([process.execPath, "run", WEAVE_CLI, ...args], {
     cwd: opts.cwd ?? process.cwd(),
+    // process.env already has TMUX_TMPDIR set in beforeAll; subprocess inherits.
     env: { ...process.env, HOME: opts.home ?? process.env.HOME! },
     stdout: "pipe",
     stderr: "pipe",
@@ -40,22 +49,6 @@ async function tmuxHasSession(name: string): Promise<boolean> {
   return (await proc.exited) === 0;
 }
 
-async function killAllWeaveTmux(): Promise<void> {
-  const proc = Bun.spawn(["tmux", "list-sessions", "-F", "#{session_name}"], {
-    stdout: "pipe",
-    stderr: "pipe",
-  });
-  const out = await new Response(proc.stdout).text();
-  await proc.exited;
-  for (const line of out.split("\n")) {
-    const name = line.trim();
-    if (name.startsWith("weave-test-")) {
-      const p = Bun.spawn(["tmux", "kill-session", "-t", name], { stdout: "pipe", stderr: "pipe" });
-      await p.exited;
-    }
-  }
-}
-
 // Temp workspace + temp HOME for the whole suite.
 let tempHome: string;
 let workspace: string;
@@ -64,19 +57,30 @@ let fakeRepo: string;
 beforeAll(async () => {
   tempHome = await mkdtemp(join(tmpdir(), "weaver-e2e-home-"));
   workspace = await mkdtemp(join(tmpdir(), "weaver-e2e-ws-"));
+  tmuxTmpdir = await mkdtemp(join(tmpdir(), "weaver-e2e-tmux-"));
 
-  // Create a real (tiny) git repo so git worktree works.
+  // Redirect tmux for this test's duration. All Bun.spawn(['tmux', ...]) calls
+  // in @weaver/tmux inherit process.env and will land on the sandbox socket.
+  originalTmuxTmpdir = process.env.TMUX_TMPDIR;
+  process.env.TMUX_TMPDIR = tmuxTmpdir;
+
   fakeRepo = await mkdtemp(join(tmpdir(), "weaver-e2e-repo-"));
-  // -b main pins the initial branch so the test doesn't depend on the CI
-  // runner's git `init.defaultBranch` config (older git defaults to master).
   await Bun.$`cd ${fakeRepo} && git init -q -b main && git config user.email test@example.com && git config user.name test && echo hello > README.md && git add . && git commit -qm init`.quiet();
 });
 
 afterAll(async () => {
-  await killAllWeaveTmux();
+  // Tear down the sandbox tmux server before touching env, so the kill uses
+  // the sandbox socket.
+  const p = Bun.spawn(["tmux", "kill-server"], { stdout: "pipe", stderr: "pipe" });
+  await p.exited;
+
+  if (originalTmuxTmpdir === undefined) delete process.env.TMUX_TMPDIR;
+  else process.env.TMUX_TMPDIR = originalTmuxTmpdir;
+
   await rm(tempHome, { recursive: true, force: true });
   await rm(workspace, { recursive: true, force: true });
   await rm(fakeRepo, { recursive: true, force: true });
+  await rm(tmuxTmpdir, { recursive: true, force: true });
 });
 
 describe("weave CLI e2e", () => {
