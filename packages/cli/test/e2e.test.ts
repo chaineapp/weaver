@@ -67,7 +67,9 @@ beforeAll(async () => {
 
   // Create a real (tiny) git repo so git worktree works.
   fakeRepo = await mkdtemp(join(tmpdir(), "weaver-e2e-repo-"));
-  await Bun.$`cd ${fakeRepo} && git init -q && git config user.email test@example.com && git config user.name test && echo hello > README.md && git add . && git commit -qm init`.quiet();
+  // -b main pins the initial branch so the test doesn't depend on the CI
+  // runner's git `init.defaultBranch` config (older git defaults to master).
+  await Bun.$`cd ${fakeRepo} && git init -q -b main && git config user.email test@example.com && git config user.name test && echo hello > README.md && git add . && git commit -qm init`.quiet();
 });
 
 afterAll(async () => {
