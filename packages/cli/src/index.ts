@@ -1,97 +1,163 @@
 #!/usr/bin/env bun
 import { parseArgs } from "node:util";
-import { resolve } from "node:path";
 import { runInit } from "./commands/init.ts";
 import { runUp } from "./commands/up.ts";
 import { runMcp } from "./commands/mcp.ts";
 import { runDoctor } from "./commands/doctor.ts";
 import { runPanes } from "./commands/panes.ts";
-import { runProjects } from "./commands/projects.ts";
 import { runKill } from "./commands/kill.ts";
-import { runMigrate } from "./commands/migrate.ts";
+import { runWorkspaceInit, runRepoAdd, runRepoList } from "./commands/workspace.ts";
+import { runProjectNew, runProjectList, runProjectRemove } from "./commands/project.ts";
 
 const HELP = `weave — coding agent orchestrator
 
-Usage:
-  weave init                         One-time: create ~/.weave/ and register MCP server globally
-  weave up [--path DIR] [--panes N]  Open Ghostty for a project (cwd or --path). Auto-registers.
-  weave projects                     List registered projects and worktrees
-  weave panes [--project X]          List Codex worker panes (optionally filtered)
-  weave kill <pane_id>               Kill a worker pane
-  weave mcp                          Start the MCP stdio server (Claude Code launches this)
-  weave doctor                       Check required binaries
-  weave migrate <path>               Remove legacy per-project .weave/ and .mcp.json (v0.1 cleanup)
+One-time setup:
+  weave init                          create ~/.weave/ and register MCP globally
+  weave workspace init [PATH]         mark a code dir (default cwd) as a workspace
+  weave repo add NAME PATH [--role R] register a repo in the current workspace
+
+Project lifecycle (a project spans 1..N repos via git worktrees):
+  weave new [--name X] [--linear CHA-123]   create a project
+  weave list                                list projects in current workspace
+  weave up [--project ID] [--panes N]       open Ghostty with planner bound to project
+  weave remove ID [--worktrees]             delete project (optionally drop worktrees)
+
+Inspection:
+  weave repos                         list registered repos
+  weave panes [--project ID]          list Codex worker panes
+  weave kill <pane_id>                kill a worker pane
+
+Internal (invoked by Claude Code):
+  weave mcp                           start the MCP stdio server
+  weave doctor                        check required binaries
 `;
 
 const [, , cmd, ...rest] = process.argv;
 
-switch (cmd) {
-  case undefined:
-  case "-h":
-  case "--help": {
-    console.log(HELP);
-    break;
-  }
-  case "init": {
-    const { values } = parseArgs({ args: rest, options: { force: { type: "boolean" } }, strict: true });
-    await runInit({ force: values.force });
-    break;
-  }
-  case "up": {
-    const { values } = parseArgs({
-      args: rest,
-      options: { panes: { type: "string" }, path: { type: "string" } },
-      strict: true,
-    });
-    const n = values.panes ? Number.parseInt(values.panes, 10) : 2;
-    if (!Number.isFinite(n) || n < 1 || n > 6) {
-      console.error(`--panes must be between 1 and 6 (got ${values.panes})`);
+async function main() {
+  switch (cmd) {
+    case undefined:
+    case "-h":
+    case "--help":
+      console.log(HELP);
+      return;
+
+    case "init": {
+      const { values } = parseArgs({ args: rest, options: { force: { type: "boolean" } }, strict: true });
+      await runInit({ force: values.force });
+      return;
+    }
+
+    case "workspace": {
+      const sub = rest[0];
+      if (sub === "init") {
+        await runWorkspaceInit({ path: rest[1] });
+        return;
+      }
+      console.error("usage: weave workspace init [PATH]");
       process.exit(1);
     }
-    await runUp({ panes: n, path: values.path });
-    break;
-  }
-  case "projects": {
-    await runProjects();
-    break;
-  }
-  case "panes": {
-    const { values } = parseArgs({
-      args: rest,
-      options: { project: { type: "string" }, worktree: { type: "string" } },
-      strict: true,
-    });
-    await runPanes({ project: values.project, worktree: values.worktree });
-    break;
-  }
-  case "kill": {
-    const paneId = rest[0];
-    if (!paneId) {
-      console.error("usage: weave kill <pane_id>");
+
+    case "repo": {
+      const sub = rest[0];
+      if (sub === "add") {
+        const name = rest[1];
+        const path = rest[2];
+        if (!name || !path) {
+          console.error("usage: weave repo add NAME PATH [--role ROLE]");
+          process.exit(1);
+        }
+        const { values } = parseArgs({ args: rest.slice(3), options: { role: { type: "string" } }, strict: true });
+        await runRepoAdd({ name, path, role: values.role });
+        return;
+      }
+      console.error("usage: weave repo add NAME PATH [--role ROLE]");
       process.exit(1);
     }
-    await runKill({ paneId });
-    break;
-  }
-  case "mcp": {
-    await runMcp();
-    break;
-  }
-  case "doctor": {
-    const ok = await runDoctor();
-    process.exit(ok ? 0 : 1);
-  }
-  case "migrate": {
-    const path = rest[0];
-    if (!path) {
-      console.error("usage: weave migrate <path-to-old-project>");
-      process.exit(1);
+
+    case "repos": {
+      await runRepoList();
+      return;
     }
-    await runMigrate({ path: resolve(path) });
-    break;
-  }
-  default: {
-    console.error(`unknown command: ${cmd}\n\n${HELP}`);
-    process.exit(1);
+
+    case "new": {
+      const { values } = parseArgs({
+        args: rest,
+        options: { name: { type: "string" }, linear: { type: "string" } },
+        strict: true,
+      });
+      await runProjectNew({ name: values.name, linear: values.linear });
+      return;
+    }
+
+    case "list": {
+      await runProjectList();
+      return;
+    }
+
+    case "remove": {
+      const id = rest[0];
+      if (!id) {
+        console.error("usage: weave remove PROJECT_ID [--worktrees]");
+        process.exit(1);
+      }
+      const { values } = parseArgs({
+        args: rest.slice(1),
+        options: { worktrees: { type: "boolean" } },
+        strict: true,
+      });
+      await runProjectRemove({ id, removeWorktrees: values.worktrees });
+      return;
+    }
+
+    case "up": {
+      const { values } = parseArgs({
+        args: rest,
+        options: { project: { type: "string" }, panes: { type: "string" } },
+        strict: true,
+      });
+      const n = values.panes ? Number.parseInt(values.panes, 10) : 2;
+      if (!Number.isFinite(n) || n < 1 || n > 6) {
+        console.error(`--panes must be 1..6 (got ${values.panes})`);
+        process.exit(1);
+      }
+      await runUp({ project: values.project, panes: n });
+      return;
+    }
+
+    case "panes": {
+      const { values } = parseArgs({
+        args: rest,
+        options: { project: { type: "string" } },
+        strict: true,
+      });
+      await runPanes({ project: values.project });
+      return;
+    }
+
+    case "kill": {
+      const paneId = rest[0];
+      if (!paneId) {
+        console.error("usage: weave kill <pane_id>");
+        process.exit(1);
+      }
+      await runKill({ paneId });
+      return;
+    }
+
+    case "mcp":
+      await runMcp();
+      return;
+
+    case "doctor": {
+      const ok = await runDoctor();
+      process.exit(ok ? 0 : 1);
+    }
+
+    default:
+      console.error(`unknown command: ${cmd}\n\n${HELP}`);
+      process.exit(1);
   }
 }
+
+await main();

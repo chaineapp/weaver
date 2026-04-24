@@ -1,40 +1,64 @@
-import { readConfig, resolveOrRegister } from "@weaver/core";
+import { findWorkspace, getProject, listProjects } from "@weaver/core";
 import { hasSession, newSession, splitPane, listPanes, openGhostty } from "@weaver/tmux";
-import { resolve } from "node:path";
 
-export async function runUp(opts: { panes: number; path?: string }): Promise<void> {
-  const cfg = await readConfig();
-  if (!cfg) {
-    console.error("Weaver not initialized yet — run `weave init` once.");
+// `weave up --project <id>` starts a planner session for a project:
+//   - tmux session: weave-<projectId> (separate from worktree sessions)
+//   - pane 0 runs `claude` with WEAVER_WORKSPACE_ROOT + WEAVER_PROJECT_ID env
+//   - Ghostty attaches to it
+//
+// Worker panes (codex) run in *worktree* tmux sessions named
+// weave-<projectId>-<worktree>, spawned on demand by create_worktree + spawn_pane.
+
+export async function runUp(opts: { project?: string; panes: number }): Promise<void> {
+  const ws = await findWorkspace();
+  if (!ws) {
+    console.error("not inside a Weaver workspace — run `weave workspace init` first");
     process.exit(1);
   }
 
-  const path = resolve(opts.path ?? process.cwd());
-  const { project, worktree, created } = await resolveOrRegister(path);
-  if (created) {
-    console.log(`✓ registered ${project.id}${worktree.id === "main" ? "" : `:${worktree.id}`} (${worktree.path})`);
+  let projectId = opts.project;
+  if (!projectId) {
+    // Default to the most recent project.
+    const all = await listProjects(ws);
+    if (all.length === 0) {
+      console.error("no projects yet — `weave new` to create one");
+      process.exit(1);
+    }
+    projectId = all[0]!.id;
+    console.log(`(defaulting to most recent project: ${projectId})`);
   }
 
-  if (!(await hasSession(worktree.tmuxSession))) {
-    await newSession({ name: worktree.tmuxSession, cwd: worktree.path, command: "claude" });
-    console.log(`✓ created tmux session ${worktree.tmuxSession} (pane 0 = claude planner)`);
+  const project = await getProject(ws, projectId);
+  if (!project) {
+    console.error(`no project with id ${projectId}`);
+    process.exit(1);
+  }
+
+  const plannerSession = `weave-${project.id}`;
+
+  if (!(await hasSession(plannerSession))) {
+    const env = [
+      `WEAVER_WORKSPACE_ROOT=${ws.root}`,
+      `WEAVER_PROJECT_ID=${project.id}`,
+    ].join(" ");
+    await newSession({
+      name: plannerSession,
+      cwd: ws.root,
+      command: `${env} claude`,
+    });
+    console.log(`✓ started planner tmux session ${plannerSession}`);
   } else {
-    console.log(`✓ tmux session ${worktree.tmuxSession} already exists`);
+    console.log(`✓ planner tmux session ${plannerSession} already running`);
   }
 
-  const existing = await listPanes(worktree.tmuxSession);
+  const existing = await listPanes(plannerSession);
   const needed = opts.panes - existing.length;
   for (let i = 0; i < needed; i++) {
-    const paneId = await splitPane({
-      target: worktree.tmuxSession,
-      direction: "vertical",
-      cwd: worktree.path,
-    });
-    console.log(`  + split pane ${paneId} (idle — the planner launches Codex in it via MCP)`);
+    const paneId = await splitPane({ target: plannerSession, direction: "vertical", cwd: ws.root });
+    console.log(`  + split pane ${paneId} (scratch — the planner drives workers via MCP)`);
   }
 
-  await openGhostty({ tmuxSession: worktree.tmuxSession, cwd: worktree.path });
-  console.log(
-    `\n✓ Ghostty opened for ${project.id}${worktree.id === "main" ? "" : `:${worktree.id}`}. Drive the planner in pane 0.`,
-  );
+  await openGhostty({ tmuxSession: plannerSession, cwd: ws.root });
+  console.log(`\n✓ Ghostty attached. Planner is in pane 0 (claude), bound to project ${project.id}.`);
+  console.log(`  MCP tools see: workspace=${ws.root}, project=${project.id}`);
 }

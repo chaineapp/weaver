@@ -1,44 +1,41 @@
 import { splitPane, sendKeys, pipePane, newSession, hasSession } from "@weaver/tmux";
-import {
-  weavePaths,
-  upsertPaneRecord,
-  resolveOrRegister,
-  type PaneRecord,
-} from "@weaver/core";
+import { weavePaths, upsertPaneRecord, type PaneRecord, type WorktreeRecord, type ProjectRecord, type Workspace } from "@weaver/core";
 
 export type SpawnOptions = {
+  workspace: Workspace;
+  project: ProjectRecord;
+  worktree: WorktreeRecord;
   task: string;
-  cwd: string;              // working directory the worker runs in (a project root or worktree)
   model?: string;
 };
 
 export async function spawnWorker(opts: SpawnOptions): Promise<PaneRecord> {
-  const { project, worktree } = await resolveOrRegister(opts.cwd);
+  const session = opts.worktree.tmuxSession;
 
-  if (!(await hasSession(worktree.tmuxSession))) {
-    await newSession({ name: worktree.tmuxSession, cwd: worktree.path });
+  if (!(await hasSession(session))) {
+    await newSession({ name: session, cwd: opts.worktree.path });
   }
 
   const paneId = await splitPane({
-    target: worktree.tmuxSession,
+    target: session,
     direction: "vertical",
-    cwd: worktree.path,
+    cwd: opts.worktree.path,
   });
 
   const runFile = weavePaths().runFile(paneId);
   await pipePane(paneId, runFile);
-
   await sendKeys(paneId, buildCodexCommand(opts.task, opts.model));
 
   const now = new Date().toISOString();
   const record: PaneRecord = {
     id: paneId,
-    projectId: project.id,
-    worktreeId: worktree.id,
+    workspaceRoot: opts.workspace.root,
+    projectId: opts.project.id,
+    worktreeName: opts.worktree.name,
     task: opts.task,
     model: opts.model,
     status: "running",
-    tmuxSession: worktree.tmuxSession,
+    tmuxSession: session,
     runFile,
     lastReviewedByte: 0,
     createdAt: now,

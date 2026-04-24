@@ -1,15 +1,11 @@
 import { listPaneRecords, type PaneRecord } from "./panes.ts";
 import { runFileSize } from "./runs.ts";
 
-// Polling primitive for the planner's auto-loop. wait_for_updates blocks until
-// any pane's run file grows past its lastReviewedByte cursor, or the timeout
-// elapses. Single-machine, single-reader: a 300ms poll is cheap and avoids the
-// complexity of chokidar + fs events until the daemon ships.
-
 export type PaneUpdate = {
   pane_id: string;
+  workspace_root: string;
   project_id: string;
-  worktree_id: string;
+  worktree_name: string;
   task: string;
   new_bytes: number;
   current_size: number;
@@ -19,7 +15,7 @@ export type PaneUpdate = {
 export type WaitOptions = {
   timeoutSeconds?: number;
   pollMs?: number;
-  filter?: { projectId?: string; worktreeId?: string };
+  filter?: { workspaceRoot?: string; projectId?: string; worktreeName?: string };
 };
 
 export async function waitForUpdates(opts: WaitOptions = {}): Promise<PaneUpdate[]> {
@@ -35,14 +31,12 @@ export async function waitForUpdates(opts: WaitOptions = {}): Promise<PaneUpdate
   }
 }
 
-async function collectUpdates(filter?: { projectId?: string; worktreeId?: string }): Promise<PaneUpdate[]> {
+async function collectUpdates(filter?: WaitOptions["filter"]): Promise<PaneUpdate[]> {
   const panes = await listPaneRecords(filter);
   const out: PaneUpdate[] = [];
   for (const p of panes) {
     const size = await runFileSize(p.id);
-    if (size > p.lastReviewedByte) {
-      out.push(toUpdate(p, size));
-    }
+    if (size > p.lastReviewedByte) out.push(toUpdate(p, size));
   }
   return out;
 }
@@ -50,8 +44,9 @@ async function collectUpdates(filter?: { projectId?: string; worktreeId?: string
 function toUpdate(p: PaneRecord, size: number): PaneUpdate {
   return {
     pane_id: p.id,
+    workspace_root: p.workspaceRoot,
     project_id: p.projectId,
-    worktree_id: p.worktreeId,
+    worktree_name: p.worktreeName,
     task: p.task,
     new_bytes: size - p.lastReviewedByte,
     current_size: size,
