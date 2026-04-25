@@ -1,5 +1,5 @@
-import { findWorkspace, getProject, listProjects, readConfig } from "@weaver/core";
-import { hasSession, newSession, listPanes, openGhostty, openGhosttyTab, isInsideGhostty, buildPlannerLayout, selectPane, setStatusLeft, installWeaverMenu } from "@weaver/tmux";
+import { findWorkspace, getProject, listProjects, readConfig, upsertPaneRecord, weavePaths } from "@weaver/core";
+import { hasSession, newSession, listPanes, openGhostty, openGhosttyTab, isInsideGhostty, buildPlannerLayout, selectPane, setStatusLeft, installWeaverMenu, sendKeys, pipePane } from "@weaver/tmux";
 import { playBanner } from "../banner.ts";
 
 // Build the command string used to launch the planner agent inside tmux.
@@ -64,11 +64,13 @@ export async function runUp(opts: { project?: string; panes: number; bypass?: bo
   const plannerCwd = join(ws.weaveDir, "projects", project.id);
 
   // Resolve planner flags. Precedence: explicit --bypass flag > WEAVER_CLAUDE_BYPASS env > ~/.weave/config.json > off.
+  // Planner binary precedence: project.plannerBinary > config > "claude".
   const cfg = await readConfig();
   const envBypass = process.env.WEAVER_CLAUDE_BYPASS === "1";
   const bypass = opts.bypass ?? envBypass ?? cfg?.planner?.bypass ?? false;
+  const plannerBinary = project.plannerBinary ?? cfg?.planner?.binary ?? "claude";
   const plannerCmd = buildPlannerCommand({
-    binary: cfg?.planner?.binary,
+    binary: plannerBinary,
     bypass,
     model: cfg?.planner?.model,
     extraArgs: cfg?.planner?.extraArgs,
@@ -87,9 +89,40 @@ export async function runUp(opts: { project?: string; panes: number; bypass?: bo
     console.log(`✓ started planner tmux session ${plannerSession}${bypass ? " (bypass permissions ON)" : ""}`);
 
     const workerPanes = await buildPlannerLayout(plannerSession, opts.panes, { cwd: plannerCwd });
-    // Return focus to the planner so the user lands in Claude, not a worker.
+
+    // Register every layout pane in the global pane registry so:
+    //   1. `weave panes --project <id>` lists them.
+    //   2. `weave dispatch worker-N <task>` can resolve worker-N → tmux pane id.
+    //   3. `weave tail worker-N` can read the right run file.
+    // Workers start as bash shells (status: "idle"). The actual codex/claude
+    // process is launched by `weave dispatch` on first task.
+    const now = new Date().toISOString();
+    const workerBinary = cfg?.worker?.binary ?? "codex";
+    for (const w of workerPanes) {
+      const runFile = weavePaths().runFile(w.paneId);
+      await pipePane(w.paneId, runFile);
+      // Print a one-line ready indicator in each worker pane so the user sees
+      // structured slots, not just blank shells.
+      await sendKeys(w.paneId, `printf '\\033[2m# weaver worker-${w.workerNum} idle — dispatch with: weave dispatch worker-${w.workerNum} "<task>"\\033[0m\\n'`, true);
+      await upsertPaneRecord({
+        id: w.paneId,
+        workspaceRoot: ws.root,
+        projectId: project.id,
+        worktreeName: "",
+        task: "",
+        status: "idle",
+        tmuxSession: plannerSession,
+        runFile,
+        lastReviewedByte: 0,
+        workerNum: w.workerNum,
+        binary: workerBinary,
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
+    // Return focus to the planner so the user lands in the planner, not a worker.
     await selectPane(`${plannerSession}:0.0`);
-    console.log(`✓ laid out ${workerPanes.length} worker pane(s) on the right (planner on left)`);
+    console.log(`✓ laid out ${workerPanes.length} worker pane(s) — registered as worker-1..worker-${workerPanes.length} (binary: ${workerBinary})`);
   } else {
     const existing = await listPanes(plannerSession);
     console.log(`✓ planner tmux session ${plannerSession} already running (${existing.length} pane(s))`);

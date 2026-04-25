@@ -12,6 +12,8 @@ import { runClean } from "./commands/clean.ts";
 import { runConfigGet, runConfigSet, runConfigList, configUsage } from "./commands/config.ts";
 import { runVersion, maybeNotifyUpdate } from "./commands/version.ts";
 import { runRestartPlanner } from "./commands/restart.ts";
+import { runDispatch } from "./commands/dispatch.ts";
+import { runTail } from "./commands/tail.ts";
 
 const HELP = `weave — coding agent orchestrator
 
@@ -22,7 +24,8 @@ ONE-TIME SETUP
 
 PROJECT LIFECYCLE (a project spans 1..N repos via git worktrees)
   weave new                                     interactive: prompt for name + linear, auto-launch
-  weave new --name X [--linear Y] [--no-up]     non-interactive create
+  weave new --name X [--linear Y] [--planner BIN] [--no-up]
+                                                non-interactive create. --planner = claude|codex (default: from config)
   weave list                                    list projects in current workspace
   weave up [--project ID] [--panes N] [--bypass]
                                                 open Ghostty: planner left, N workers in a grid (N: 1-6)
@@ -41,9 +44,16 @@ CONFIG (defaults read by every weave up / spawn_pane)
                                                       worker.bypass, worker.model, worker.extraArgs,
                                                       defaultPanes, defaultWaitTimeoutSeconds
 
+DISPATCH (Bash-driven worker control — see CHA-1012)
+  weave dispatch worker-N "<task>"    fire a task at a worker pane (parallel-safe)
+                                      [--binary X] [--model Y] [--bypass]
+  weave tail worker-N [--follow] [--wait-done]
+                                      stream a worker's run file, optionally
+                                      block until codex emits a turn-complete event
+
 INSPECTION
   weave repos                         list registered repos
-  weave panes [--project ID]          list Codex worker panes
+  weave panes [--project ID]          list worker panes (worker-1..N + status)
   weave kill <pane_id>                kill a worker pane
   weave clean                         wipe all panes, run files, weave-* tmux sessions
   weave version                       current version + check GitHub for updates
@@ -115,6 +125,7 @@ async function main() {
         options: {
           name: { type: "string" },
           linear: { type: "string" },
+          planner: { type: "string" },  // "claude" | "codex" | other
           "no-up": { type: "boolean" },
         },
         strict: true,
@@ -124,6 +135,7 @@ async function main() {
       await runProjectNew({
         name: values.name,
         linear: values.linear,
+        plannerBinary: values.planner,
         thenUp: values["no-up"] ? false : undefined,
       });
       return;
@@ -185,6 +197,76 @@ async function main() {
         process.exit(1);
       }
       await runUp({ project: values.project, panes: n, bypass: values.bypass });
+      return;
+    }
+
+    case "dispatch": {
+      // weave dispatch <worker> <task...>
+      // Example: weave dispatch worker-1 "what is 1+1, reply with just the number"
+      // The task can be the rest of argv joined with spaces (no need to quote
+      // for the user, but quoting works too).
+      let values: { binary?: string; model?: string; bypass?: boolean };
+      let positionals: string[];
+      try {
+        const parsed = parseArgs({
+          args: rest,
+          options: {
+            binary: { type: "string" },
+            model: { type: "string" },
+            bypass: { type: "boolean" },
+          },
+          strict: true,
+          allowPositionals: true,
+        });
+        values = parsed.values as typeof values;
+        positionals = parsed.positionals;
+      } catch (err) {
+        console.error(`error: ${(err as Error).message}`);
+        console.error(`usage: weave dispatch <worker-N | %paneid> <task...> [--binary X] [--model Y] [--bypass]`);
+        process.exit(1);
+      }
+      const [worker, ...taskParts] = positionals;
+      const task = taskParts.join(" ").trim();
+      if (!worker || !task) {
+        console.error("usage: weave dispatch <worker-N | %paneid> <task...> [--binary X] [--model Y] [--bypass]");
+        process.exit(1);
+      }
+      await runDispatch({ worker, task, binary: values.binary, model: values.model, bypass: values.bypass });
+      return;
+    }
+
+    case "tail": {
+      let values: { follow?: boolean; "wait-done"?: boolean; since?: string };
+      let positionals: string[];
+      try {
+        const parsed = parseArgs({
+          args: rest,
+          options: {
+            follow: { type: "boolean" },
+            "wait-done": { type: "boolean" },
+            since: { type: "string" },
+          },
+          strict: true,
+          allowPositionals: true,
+        });
+        values = parsed.values as typeof values;
+        positionals = parsed.positionals;
+      } catch (err) {
+        console.error(`error: ${(err as Error).message}`);
+        console.error(`usage: weave tail <worker-N | %paneid> [--follow] [--wait-done] [--since BYTE]`);
+        process.exit(1);
+      }
+      const worker = positionals[0];
+      if (!worker) {
+        console.error("usage: weave tail <worker-N | %paneid> [--follow] [--wait-done] [--since BYTE]");
+        process.exit(1);
+      }
+      await runTail({
+        worker,
+        follow: values.follow,
+        waitDone: values["wait-done"],
+        since: values.since ? Number.parseInt(values.since, 10) : undefined,
+      });
       return;
     }
 

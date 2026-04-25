@@ -19,11 +19,15 @@
 
 import { splitPane } from "./tmux.ts";
 
+// Rich descriptor — paneId is the tmux %N id, workerNum is 1..N matching the
+// visual order so the planner can address workers by `worker-1` etc.
+export type LayoutWorker = { paneId: string; workerNum: number };
+
 export async function buildPlannerLayout(
   session: string,
   workers: number,
   opts: { cwd?: string } = {},
-): Promise<string[]> {
+): Promise<LayoutWorker[]> {
   if (workers < 1 || workers > 6) {
     throw new Error(`workers must be 1..6 (got ${workers})`);
   }
@@ -32,23 +36,23 @@ export async function buildPlannerLayout(
 
   // First split: planner keeps the left half, rightRoot is the whole right half.
   const rightRoot = await splitPane({ target: `${session}:0.0`, direction: "horizontal", cwd });
-  const workerPanes: string[] = [];
+  const ids: string[] = [];
 
   switch (workers) {
     case 1:
-      workerPanes.push(rightRoot);
+      ids.push(rightRoot);
       break;
 
     case 2: {
       const b = await splitPane({ target: rightRoot, direction: "vertical", cwd });
-      workerPanes.push(rightRoot, b);
+      ids.push(rightRoot, b);
       break;
     }
 
     case 3: {
       const bottom = await splitPane({ target: rightRoot, direction: "vertical", cwd });
       const topRight = await splitPane({ target: rightRoot, direction: "horizontal", cwd });
-      workerPanes.push(rightRoot, topRight, bottom);
+      ids.push(rightRoot, topRight, bottom);
       break;
     }
 
@@ -56,7 +60,7 @@ export async function buildPlannerLayout(
       const bottom = await splitPane({ target: rightRoot, direction: "vertical", cwd });
       const topRight = await splitPane({ target: rightRoot, direction: "horizontal", cwd });
       const bottomRight = await splitPane({ target: bottom, direction: "horizontal", cwd });
-      workerPanes.push(rightRoot, topRight, bottom, bottomRight);
+      ids.push(rightRoot, topRight, bottom, bottomRight);
       break;
     }
 
@@ -65,7 +69,7 @@ export async function buildPlannerLayout(
       const bottom = await splitPane({ target: middle, direction: "vertical", percent: 50, cwd });
       const topRight = await splitPane({ target: rightRoot, direction: "horizontal", cwd });
       const middleRight = await splitPane({ target: middle, direction: "horizontal", cwd });
-      workerPanes.push(rightRoot, topRight, middle, middleRight, bottom);
+      ids.push(rightRoot, topRight, middle, middleRight, bottom);
       break;
     }
 
@@ -75,10 +79,10 @@ export async function buildPlannerLayout(
       const topRight = await splitPane({ target: rightRoot, direction: "horizontal", cwd });
       const middleRight = await splitPane({ target: middle, direction: "horizontal", cwd });
       const bottomRight = await splitPane({ target: bottom, direction: "horizontal", cwd });
-      workerPanes.push(rightRoot, topRight, middle, middleRight, bottom, bottomRight);
+      ids.push(rightRoot, topRight, middle, middleRight, bottom, bottomRight);
       break;
     }
   }
 
-  return workerPanes;
+  return ids.map((paneId, i) => ({ paneId, workerNum: i + 1 }));
 }

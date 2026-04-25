@@ -93,7 +93,7 @@ describe("projects", () => {
     await rm(wsRoot, { recursive: true });
   });
 
-  test("createProject writes a CLAUDE.md priming the planner", async () => {
+  test("createProject writes CLAUDE.md AND AGENTS.md priming the planner to dispatch", async () => {
     const { initWorkspace, createProject } = await import("../src/index.ts");
     const wsRoot = await mkdtemp(join(tmpdir(), "weaver-ws-"));
     const ws = await initWorkspace(wsRoot, [
@@ -103,15 +103,36 @@ describe("projects", () => {
     const claudeMd = await Bun.file(
       join(wsRoot, ".weaver", "projects", p.id, "CLAUDE.md"),
     ).text();
-    // Primes the planner on the key tools and the project identity.
-    expect(claudeMd).toContain("current_project()");
-    expect(claudeMd).toContain("list_memories()");
-    expect(claudeMd).toContain("remember()");
+    // The brief teaches the planner to dispatch via Bash (CHA-1012 — MCP
+    // tools don't reach the model in Claude Code 2.1.119, so we route worker
+    // control through `weave dispatch` / `weave tail` shell commands).
+    expect(claudeMd).toContain("weave dispatch");
+    expect(claudeMd).toContain("weave tail");
+    expect(claudeMd).toContain("worker-N");
+    expect(claudeMd).toContain("main planner");
     expect(claudeMd).toContain("task-a");
     expect(claudeMd).toContain("CHA-100");
     expect(claudeMd).toContain("chain5");
-    // Calls out that Weaver memory beats Claude Code's auto-memory on conflicts.
-    expect(claudeMd).toContain("Weaver memory wins");
+    // Codex doesn't read CLAUDE.md, so the same brief is written to AGENTS.md
+    // alongside it. Both files must exist with identical content.
+    const agentsMd = await Bun.file(
+      join(wsRoot, ".weaver", "projects", p.id, "AGENTS.md"),
+    ).text();
+    expect(agentsMd).toBe(claudeMd);
+    await rm(wsRoot, { recursive: true });
+  });
+
+  test("createProject persists per-project plannerBinary override", async () => {
+    const { initWorkspace, createProject } = await import("../src/index.ts");
+    const wsRoot = await mkdtemp(join(tmpdir(), "weaver-ws-"));
+    const ws = await initWorkspace(wsRoot, []);
+    const p = await createProject(ws, { name: "codex-led", plannerBinary: "codex" });
+    expect(p.plannerBinary).toBe("codex");
+    // Re-read from disk to confirm it round-trips (project.json field).
+    const meta = JSON.parse(
+      await Bun.file(join(wsRoot, ".weaver", "projects", p.id, "project.json")).text(),
+    );
+    expect(meta.plannerBinary).toBe("codex");
     await rm(wsRoot, { recursive: true });
   });
 });

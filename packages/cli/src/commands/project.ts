@@ -18,6 +18,9 @@ async function ask(question: string, fallback: string): Promise<string> {
 export async function runProjectNew(opts: {
   name?: string;
   linear?: string;
+  // Per-project planner binary override. "claude" or "codex" (or any other
+  // CLI on PATH the user has configured). Falls back to global config.
+  plannerBinary?: string;
   thenUp?: boolean;
 } = {}): Promise<void> {
   const ws = await findWorkspace();
@@ -47,10 +50,11 @@ export async function runProjectNew(opts: {
     }
   }
 
-  const p = await createProject(ws, { name, linearTicket: linear });
+  const p = await createProject(ws, { name, linearTicket: linear, plannerBinary: opts.plannerBinary });
   console.log(`\n✓ created project ${p.id}`);
   console.log(`  name:     ${p.name}`);
   if (p.linearTicket) console.log(`  linear:   ${p.linearTicket}`);
+  if (p.plannerBinary) console.log(`  planner:  ${p.plannerBinary}`);
   console.log(`  location: ${ws.root}/.weaver/projects/${p.id}/`);
 
   // If invoked interactively, immediately launch the planner in the current

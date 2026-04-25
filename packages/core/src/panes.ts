@@ -16,6 +16,13 @@ export type PaneRecord = {
   tmuxSession: string;
   runFile: string;
   lastReviewedByte: number;
+  // workerNum is 1..N for panes created by `weave up`'s buildPlannerLayout.
+  // Lets the user reference workers by `worker-1` instead of tmux pane id `%23`.
+  // Optional because on-demand spawn_pane workers (no fixed slot) may omit it.
+  workerNum?: number;
+  // binary the worker will run when dispatched (codex / claude / aider / ...).
+  // Set at registration time from project plannerBinary config or global default.
+  binary?: string;
   createdAt: string;
   updatedAt: string;
 };

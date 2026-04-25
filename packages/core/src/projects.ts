@@ -23,6 +23,9 @@ export type ProjectRecord = {
   linearTicket?: string;
   workspaceRoot: string;
   claudeSessionId?: string;
+  // Per-project planner binary override. Falls back to ~/.weave/config.json's
+  // planner.binary, then to "claude". Set at `weave new --planner codex`.
+  plannerBinary?: "claude" | "codex" | string;
   worktrees: Record<string, WorktreeRecord>;  // keyed by worktree name
   createdAt: string;
   updatedAt: string;
@@ -40,7 +43,7 @@ function projectPaths(workspaceRoot: string, id: string) {
 
 export async function createProject(
   workspace: Workspace,
-  opts: { name: string; linearTicket?: string },
+  opts: { name: string; linearTicket?: string; plannerBinary?: string },
 ): Promise<ProjectRecord> {
   if (!opts.name?.trim()) throw new Error("project name is required");
 
@@ -58,13 +61,20 @@ export async function createProject(
     name: opts.name,
     linearTicket: opts.linearTicket,
     workspaceRoot: workspace.root,
+    plannerBinary: opts.plannerBinary,
     worktrees: {},
     createdAt: now,
     updatedAt: now,
   };
   await Bun.write(p.meta, JSON.stringify(record, null, 2) + "\n");
   await Bun.write(p.notes, `# ${record.name}\n\nCreated ${now}\n${opts.linearTicket ? `\nLinear: ${opts.linearTicket}\n` : ""}`);
-  await Bun.write(join(p.base, "CLAUDE.md"), buildPlannerClaudeMd(record, workspace));
+  // Write CLAUDE.md (read by claude planner) AND AGENTS.md (read by codex
+  // planner). Same orchestration brief — codex doesn't read CLAUDE.md and
+  // claude doesn't read AGENTS.md, but both should learn to dispatch via
+  // `weave dispatch` instead of doing work themselves.
+  const brief = buildPlannerBrief(record, workspace);
+  await Bun.write(join(p.base, "CLAUDE.md"), brief);
+  await Bun.write(join(p.base, "AGENTS.md"), brief);
   return record;
 }
 
@@ -79,57 +89,61 @@ async function uniqueProjectSlug(workspace: Workspace, name: string): Promise<st
   return candidate;
 }
 
-// CLAUDE.md read by the planner Claude on session start. Claude Code walks up
-// the dir tree for CLAUDE.md, so dropping one at the project folder means
-// every `weave up --project <id>` planner sees it.
-function buildPlannerClaudeMd(project: ProjectRecord, workspace: Workspace): string {
+// Orchestration brief written to BOTH CLAUDE.md and AGENTS.md when a project
+// is created. Claude reads CLAUDE.md, codex reads AGENTS.md — same content so
+// the user can pick either as the planner binary and get the same dispatch
+// instructions.
+//
+// Why Bash + CLI commands instead of MCP tools: CHA-1012 — Claude Code 2.1.119
+// stdio MCP servers don't advertise tools to the model. Until that's fixed
+// upstream, we route dispatch through the shell. The MCP server still exists
+// for memory + project-state reads, but workers are controlled via Bash.
+function buildPlannerBrief(project: ProjectRecord, workspace: Workspace): string {
   const linear = project.linearTicket ? `\n- **Linear ticket**: ${project.linearTicket}` : "";
   const repos = Object.values(workspace.config.repos);
   const repoList = repos.length
     ? repos.map((r) => `  - \`${r.name}\`${r.role ? ` (${r.role})` : ""} — ${r.path}`).join("\n")
-    : "  (none registered — use `register_repo` or `weave repo add`)";
+    : "  (none registered — use `weave repo add`)";
   return `# Weaver project: ${project.name}
 
-You are the **planner** for a Weaver-managed project. A Weaver MCP server is wired to this session (env: WEAVER_PROJECT_ID, WEAVER_WORKSPACE_ROOT).
+You are the **main planner** for a Weaver-managed project. Your job is decomposition + dispatch + summarization. **You do not execute tasks yourself.**
 
 - **Project id**: \`${project.id}\`${linear}
 - **Workspace**: \`${workspace.root}\`
 - **Registered repos**:
 ${repoList}
 
-## First thing, every session — call these MCP tools
+## The rule
 
-1. \`current_project()\` — returns this project's metadata, registered repos, and existing worktrees. Do this BEFORE you propose anything.
-2. \`list_memories()\` — shows standing rules and prior decisions written to Weaver's memory at \`~/.weave/memory/\`. Skim titles; \`read_memory\` anything directly relevant.
-3. If the task has subtasks that can run in parallel, plan to use \`create_worktree\` + \`spawn_pane\` + \`wait_for_updates\`. Read \`patterns/parallel-dispatch.md\` from memory.
+For every non-trivial task, you delegate to a worker via Bash:
 
-## Weaver memory vs Claude Code's built-in auto-memory
+1. \`weave panes --project ${project.id}\` — list available workers (registered as worker-1, worker-2, ...).
+2. \`weave dispatch worker-N "<task>"\` — assign the task to worker N. The worker spawns a fresh codex (or claude, configurable) and runs the task non-interactively. Run dispatches in parallel when tasks are independent.
+3. \`weave tail worker-N --wait-done\` — block until that worker emits a turn-complete event, then prints the final result. Run tails in parallel for all dispatched workers.
+4. Summarize the consolidated results back to the user.
 
-They are different systems.
+If you find yourself writing code, running build commands, or grepping the repo directly, **stop**. Dispatch instead. The only direct work you do is decomposition and synthesis.
 
-- **Weaver memory** (~/.weave/memory/) — what you access via \`list_memories\`, \`search_memories\`, \`read_memory\`, \`remember\`. This is the source of truth for standing preferences, architectural decisions, testing conventions, PR workflow.
-- **Claude Code auto-memory** (~/.claude/projects/.../memory/) — Claude Code's own per-cwd memory system. Contains prior-session observations. Useful but may be stale and may reference work unrelated to this project.
+## The 7-step loop (per top-level user request)
 
-**When there's a conflict, Weaver memory wins.** If you see Claude Code recalling something that looks off-topic for THIS project, ignore it in favor of \`current_project\` + Weaver memory.
+1. **Tell** — restate the user's goal in your own words.
+2. **Analyze** — identify subtasks, dependencies, parallelism.
+3. **Create** — if subtasks need isolation, create a worktree per subtask via \`weave\` or \`git worktree add\`.
+4. **Spawn** — \`weave dispatch worker-N "<subtask>"\` for each, in parallel.
+5. **Distribute** — record which worker owns which subtask.
+6. **Monitor** — \`weave tail worker-N --wait-done\` for each, in parallel; if any fails, dispatch a debug worker.
+7. **Summarize** — report consolidated results, link to PRs / Linear if relevant.
 
-## Auto-remember
+## Weaver memory
 
-When the user states a standing preference, architectural decision, testing convention, or PR workflow rule that is not tied to one task — call \`remember()\` IMMEDIATELY. Do not wait until the end of the session.
+\`~/.weave/memory/\` holds standing rules, architectural decisions, testing conventions, PR workflow. Read at session start:
 
-Example triggers:
-- "we always X"
-- "never do Y"
-- "the rule is Z"
-- "make sure to …"
+- \`weave memory list\` (or read \`~/.weave/memory/\` directly)
+- When the user states a standing preference ("we always X", "the rule is Y"), record it: \`weave memory remember <category> "<rule>"\`.
 
-Categories: \`architecture\`, \`patterns\`, \`testing\`, \`pr-behavior\`, \`runbooks\`, \`glossary\`.
+## Repos in this workspace
 
-## For task execution
-
-- **Plan before creating worktrees.** Present the breakdown, propose a parallelism count, wait for user sign-off.
-- Use \`create_worktree({repo_name, branch, linear_ticket?})\` to add a git worktree under this project.
-- Use \`spawn_pane({worktree_name, task})\` to run a Codex worker in a tmux pane inside that worktree.
-- Use \`wait_for_updates({timeout_seconds: 30})\` in a loop after spawning — do not ask the user to re-prompt you for updates. Summarize completed panes back to the user proactively.
+Workers should run in the right repo for the task. If a task spans frontend + backend, dispatch one worker per repo.
 `;
 }
 
