@@ -124,7 +124,7 @@ ${repoList}
 For every non-trivial task, you delegate to a worker via Bash:
 
 1. \`weave panes --project ${project.id}\` — list available workers (registered as worker-1, worker-2, ...).
-2. \`weave dispatch worker-N "<task>"\` — assign the task to worker N. The worker spawns a fresh codex (or claude, configurable) and runs the task non-interactively. Run dispatches in parallel when tasks are independent. **If the work lives in a git worktree separate from where \`weave up\` started**, pass \`--cwd <worktree-path>\` so the worker's claude can edit files there (otherwise its Edit tool is sandboxed to the original launch dir and will silently refuse).
+2. \`weave dispatch worker-N "<task>"\` — assign the task to worker N. The worker spawns a fresh codex (or claude, configurable) and runs the task non-interactively. Run dispatches in parallel when tasks are independent. **The worker runs in whatever cwd you call \`weave dispatch\` from** — \`cd /Users/pom/Code/weaver && weave dispatch worker-1 "..."\` puts the worker in that repo. To override, pass \`--cwd <path>\` explicitly. (The cd-then-dispatch pattern matters: claude's Edit tool sandboxes to its launch cwd and resolves relative paths against it, so getting cwd right means worker can both read and write the right files.)
 3. \`weave tail worker-N --wait-done\` — block until that worker emits a turn-complete event, then prints the final result. Run tails in parallel for all dispatched workers.
 4. Summarize the consolidated results back to the user.
 

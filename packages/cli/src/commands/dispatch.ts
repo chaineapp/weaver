@@ -73,15 +73,19 @@ export async function runDispatch(opts: DispatchOpts): Promise<void> {
     extraArgs: cfg?.worker?.extraArgs,
   });
 
-  // If the planner asked for a specific cwd (e.g. a fresh worktree), cd the
-  // pane there first. claude treats its launch cwd as the "primary directory"
-  // for Edit-tool sandboxing, so without this the worker can't write to a
-  // different path than wherever `weave up` started the pane (typically the
-  // project folder). Sleep a beat after cd so the prompt redraws before we
-  // type the next command — without it the keystrokes can race the redraw and
-  // get interpreted as part of the prompt.
-  if (opts.cwd) {
-    await sendKeys(pane.id, `cd ${shellQuote(opts.cwd)}`, true);
+  // Default --cwd to the caller's process.cwd() so shell intuition holds:
+  // `cd /some/repo && weave dispatch worker-1 "..."` runs the worker IN
+  // /some/repo, just like any other shell command would. claude treats its
+  // launch cwd as the "primary directory" for Edit-tool sandboxing AND for
+  // resolving relative paths in the task prompt, so without this the worker
+  // executes in whatever dir `weave up` originally started the pane in
+  // (typically the project folder under .weaver/projects/<id>/), which is
+  // almost never where the user wants the work to happen. Explicit --cwd
+  // wins; pass --cwd "" to opt out of any cd if you really want the pane's
+  // existing cwd.
+  const targetCwd = opts.cwd === undefined ? process.cwd() : opts.cwd;
+  if (targetCwd) {
+    await sendKeys(pane.id, `cd ${shellQuote(targetCwd)}`, true);
     await new Promise((r) => setTimeout(r, 150));
   }
 
@@ -99,7 +103,7 @@ export async function runDispatch(opts: DispatchOpts): Promise<void> {
   await setPaneStatus(pane.id, "running");
 
   const slot = pane.workerNum != null ? `worker-${pane.workerNum}` : pane.id;
-  console.log(`✓ dispatched to ${slot} (${pane.id}, ${binary}${opts.cwd ? `, cwd=${opts.cwd}` : ""})`);
+  console.log(`✓ dispatched to ${slot} (${pane.id}, ${binary}${targetCwd ? `, cwd=${targetCwd}` : ""})`);
   console.log(`  task: ${opts.task}`);
   console.log(`  follow output: weave tail ${slot} --follow`);
   console.log(`  wait until done: weave tail ${slot} --wait-done`);
