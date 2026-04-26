@@ -18,7 +18,10 @@
     "typecheck": "bun --filter '*' typecheck",
     "test": "bun test",
     "build": "bun --filter '*' build",
-    "weave": "bun run packages/cli/src/index.ts"
+    "weave": "bun run packages/cli/src/index.ts",
+    "eval": "WEAVER_RUN_EVALS=1 bun test packages/cli/test/e2e/",
+    "prepush": "bun test && bun run eval",
+    "install-hooks": "bash scripts/install-hooks.sh"
   },
   "devDependencies": {
     "@types/bun": "latest",

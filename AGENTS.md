@@ -8,6 +8,8 @@ Read this before writing any code in this repo.
 - **Conventional Commits are required** — `feat:`, `fix:`, `refactor:`, etc. See [CONTRIBUTING.md](./CONTRIBUTING.md). The release-please workflow parses commit messages to generate CHANGELOG entries and bump versions automatically.
 - Every commit message should explain the *why*, not the *what*. The diff shows what.
 - No CI gate blocks merges, but do not push red. Run `bun test && bun run typecheck` locally first.
+- **Run `bun run eval` before pushing changes that touch the dispatch path** — anything in `packages/cli/src/commands/{dispatch,tail,up}.ts`, `packages/tmux/src/layout.ts`, or `packages/core/src/{projects,panes,paths,init}.ts`. The eval spawns a real planner + 3 real workers in a temp tmux session and asserts the end-to-end report. ~40s, costs API tokens. Auto-picks `claude` (preferred) or `codex` (fallback); skips with a warning if neither is on PATH.
+- **One-time hook setup** (recommended): `bun run install-hooks` wires `bun test && bun run eval` into git pre-push. Skip on a per-push basis with `git push --no-verify` (use sparingly — typos and docs only).
 - **Never hand-edit version numbers.** release-please owns every `package.json`'s `version` field. Hand-edits will get clobbered or trigger spurious releases.
 
 ## Stack
@@ -51,3 +53,26 @@ Read this before writing any code in this repo.
 - **Small independent PRs** over stacked branches.
 
 These are shipped as seed playbooks in `.weave/memory/` when `weave init` runs, so every project Weaver touches inherits them.
+
+## Weaver philosophy (mirror of `~/.weave/USER.md`)
+
+Weaver is for the **100x developer** — technical founders and senior engineers shipping at high velocity with small teams. When you write Weaver code, hold the same bar:
+
+- **Bias toward shipping.** Decision speed over analysis paralysis. Default to action when the next step is reversible.
+- **Force multiplier, not babysitter.** Users are sharp. Don't pad answers, don't hedge, don't ask questions whose answers you can reasonably infer.
+- **Reuse over invent.** Find the existing pattern before proposing a new one.
+- **Small PRs over stacked branches.** Ship one thing, merge it, ship the next.
+- **Build velocity > safety theater.** When the user grants `--bypass`, trust them. Don't litter the code with disclaimers.
+
+This block intentionally mirrors `~/.weave/USER.md`. Dogfooding case: when a Weaver planner is working on the Weaver repo itself, it gets the same brief from two angles — the user-level system prompt (USER.md, auto-injected via `--append-system-prompt`) plus this AGENTS.md (codex) / CLAUDE.md (claude, symlinked) at the repo root.
+
+## Dispatch (when developing Weaver inside Weaver)
+
+If you're a planner running inside `weave up` and the project under work IS the weaver repo itself, dispatch primitives are unchanged — just used on Weaver code:
+
+- `Bash: weave panes [--project ID]` — list workers
+- `Bash: weave dispatch worker-N "<task>" [--binary claude|codex] [--bypass]` — assign work
+- `Bash: weave tail worker-N [--follow] [--wait-done]` — read worker output
+- `Bash: bun run eval` — verify the dispatch substrate still works after a change
+
+Don't dispatch a worker to "run the eval against my in-progress branch" naively — the eval spawns its OWN tmux session in a temp workspace, isolated from yours. Just run it directly via Bash.

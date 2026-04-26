@@ -22,7 +22,26 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const ENABLED = process.env.WEAVER_RUN_EVALS === "1";
-const skipIf = ENABLED ? test : test.skip;
+
+// Pick a usable planner binary at module load: prefer claude, fall back to
+// codex if claude isn't installed/usable, skip the whole suite if neither
+// works. Avoids placeholder runs against a binary that will crash on launch.
+const PLANNER = await pickPlannerBinary();
+const skipIf = ENABLED && PLANNER ? test : test.skip;
+
+async function pickPlannerBinary(): Promise<"claude" | "codex" | null> {
+  for (const candidate of ["claude", "codex"] as const) {
+    try {
+      const proc = Bun.spawn([candidate, "--version"], { stdout: "pipe", stderr: "pipe" });
+      const code = await Promise.race([
+        proc.exited,
+        new Promise<number>((r) => setTimeout(() => { proc.kill(); r(124); }, 5000)),
+      ]);
+      if (code === 0) return candidate;
+    } catch { /* binary not on PATH — try next */ }
+  }
+  return null;
+}
 
 // Per-test cleanup state. Populated by setupEvalProject; consumed by afterEach.
 let liveSession: string | null = null;
@@ -115,7 +134,11 @@ async function waitForOutput(session: string, paneIdx: number, marker: RegExp, t
 describe("e2e dispatch evals (gated by WEAVER_RUN_EVALS=1)", () => {
   beforeAll(() => {
     if (!ENABLED) {
-      console.log("\n  ℹ️  e2e evals SKIPPED — set WEAVER_RUN_EVALS=1 to run (consumes Claude API tokens, ~30-90s/test).\n");
+      console.log("\n  ℹ️  e2e evals SKIPPED — set WEAVER_RUN_EVALS=1 to run (consumes API tokens, ~30-90s/test).\n");
+    } else if (!PLANNER) {
+      console.log("\n  ⚠️  e2e evals SKIPPED — neither `claude` nor `codex` is on PATH and runnable.\n     Install one to enable evals (claude preferred).\n");
+    } else {
+      console.log(`\n  🧪 e2e evals enabled — using planner binary: ${PLANNER}\n`);
     }
   });
 
@@ -123,7 +146,8 @@ describe("e2e dispatch evals (gated by WEAVER_RUN_EVALS=1)", () => {
   // Verifies: planner spawns 3 workers in parallel, each computes a math
   // problem via claude -p, planner reads the results and reports the totals.
   skipIf("flat dispatch: planner → 3 parallel workers → consolidated results", async () => {
-    const { session } = await setupEvalProject({ name: "eval-flat", panes: 3, planner: "claude" });
+    // PLANNER is non-null here — skipIf only enables this test when picker succeeded.
+    const { session } = await setupEvalProject({ name: "eval-flat", panes: 3, planner: PLANNER! });
 
     // Give claude in pane 0 ~8s to fully render its TUI before we type.
     await new Promise((r) => setTimeout(r, 8000));
