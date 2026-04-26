@@ -56,7 +56,9 @@ INSPECTION
   weave repos                         list registered repos
   weave panes [--project ID]          list worker panes (worker-1..N + status)
   weave kill <pane_id>                kill a worker pane
-  weave clean                         wipe all panes, run files, weave-* tmux sessions
+  weave clean [--close-windows]       wipe all panes, run files, weave-* tmux sessions
+                                      --close-windows: also kill orphan tmux clients
+                                      so Ghostty tabs close when sessions are dead
   weave version                       current version + check GitHub for updates
 
 INTERNAL
@@ -296,9 +298,15 @@ async function main() {
       await runMcp();
       return;
 
-    case "clean":
-      await runClean();
+    case "clean": {
+      const { values } = parseArgs({
+        args: rest,
+        options: { "close-windows": { type: "boolean" } },
+        strict: true,
+      });
+      await runClean({ closeWindows: values["close-windows"] });
       return;
+    }
 
     case "config": {
       const sub = rest[0];
