@@ -107,11 +107,15 @@ export async function runAutoroute(opts: AutorouteOpts): Promise<void> {
   console.log(`${logPrefix} watching claude session logs in ${claudeLogDir}`);
 
   // Track which dispatch-block hashes we've already processed so the same
-  // block scanned across many polls doesn't fire twice.
+  // block scanned across many polls doesn't fire twice. Seeded on startup
+  // (and on log-file switch) with every block currently in the log so we
+  // don't re-fire historical blocks from previous sessions that the user
+  // already saw results for.
   const processed = new Set<string>();
   let lastLogPath: string | null = null;
   let lastSize = 0;
   let stableSince = 0;
+  let seededFor: string | null = null;
 
   while (true) {
     if (!(await tmuxHasSession(session))) {
@@ -166,6 +170,19 @@ export async function runAutoroute(opts: AutorouteOpts): Promise<void> {
       prompt: m[2]!.trim(),
       key: hash(`${m[1]}|${m[2]}`),
     }));
+
+    // First time we see this log file (startup or session switch), seed
+    // `processed` with every block already in it. We assume any blocks
+    // present at startup were already handled in a prior life — refire
+    // would just confuse the user with duplicate worker results. Only
+    // dispatch blocks the user emits AFTER autoroute is watching.
+    if (seededFor !== logPath) {
+      for (const b of blocks) processed.add(b.key);
+      seededFor = logPath;
+      const seedCount = blocks.length;
+      console.log(`${logPrefix} seeded ${seedCount} pre-existing block(s) as already-processed`);
+      continue;
+    }
     const fresh = blocks.filter((b) => !processed.has(b.key));
     if (fresh.length === 0) {
       stableSince = Date.now() + 60_000; // long pause; nothing to do
@@ -192,29 +209,37 @@ export async function runAutoroute(opts: AutorouteOpts): Promise<void> {
       }),
     );
 
-    // Wait for all dispatched workers to reach status=completed (or fail
-    // out). Hard-cap at 10 minutes so a stuck worker doesn't hang autoroute.
+    // Wait for all dispatched workers to emit a terminal claude `result`
+    // event in their run files. We can't rely on PaneRecord.status because
+    // only `weave tail --wait-done` flips it — autoroute doesn't run tail.
+    // Instead, poll each worker's run file directly for the result event,
+    // starting from the dispatch-time watermark.
     const startWait = Date.now();
     const TIMEOUT_MS = 10 * 60 * 1000;
     const targetWorkers = new Set(fresh.map((b) => b.worker));
     const results: { worker: string; result: string }[] = [];
-    while (Date.now() - startWait < TIMEOUT_MS) {
-      const records = await listPaneRecords({ projectId: project.id });
-      const relevant = records.filter((r) => r.workerNum != null && targetWorkers.has(`worker-${r.workerNum}`));
-      const allDone = relevant.length === targetWorkers.size && relevant.every((r) => r.status === "completed" || r.status === "failed");
-      if (allDone) {
-        for (const r of relevant) {
-          const slot = `worker-${r.workerNum}`;
-          const text = await extractFinalResult(r.runFile, r.lastReviewedByte);
-          results.push({ worker: slot, result: text || "(no output captured)" });
-        }
-        break;
-      }
-      await sleep(2000);
+    const records = await listPaneRecords({ projectId: project.id });
+    const relevant = records.filter((r) => r.workerNum != null && targetWorkers.has(`worker-${r.workerNum}`));
+    const pending = new Map<string, { runFile: string; sinceByte: number }>();
+    for (const r of relevant) {
+      pending.set(`worker-${r.workerNum}`, { runFile: r.runFile, sinceByte: r.lastReviewedByte });
     }
-    if (results.length === 0) {
-      console.warn(`${logPrefix} timed out waiting for workers; injecting timeout notice`);
-      for (const b of fresh) results.push({ worker: b.worker, result: "(timeout — no result within 10m)" });
+    while (pending.size > 0 && Date.now() - startWait < TIMEOUT_MS) {
+      for (const [slot, info] of pending) {
+        const text = await extractFinalResult(info.runFile, info.sinceByte);
+        if (text != null) {
+          results.push({ worker: slot, result: text });
+          pending.delete(slot);
+          console.log(`${logPrefix} ← ${slot} done (${text.slice(0, 80).replace(/\n/g, " ")}…)`);
+        }
+      }
+      if (pending.size > 0) await sleep(2000);
+    }
+    if (pending.size > 0) {
+      console.warn(`${logPrefix} timed out on: ${[...pending.keys()].join(", ")}`);
+      for (const slot of pending.keys()) {
+        results.push({ worker: slot, result: "(timeout — no result within 10m)" });
+      }
     }
 
     // Format and inject as a tmux paste-buffer (preserves newlines) + Enter.
@@ -264,35 +289,30 @@ async function tmuxList(session: string): Promise<{ id: string; idx: number }[]>
 }
 
 // Pull the final assistant text from a worker's run file, starting at the
-// dispatch-time watermark. claude --output-format stream-json emits a
-// terminal {type:"result", subtype:"success", result:"..."} — that's what
-// we want. Falls back to scraping the last assistant.message.content text.
+// dispatch-time watermark. Returns null if the worker hasn't emitted a
+// terminal result yet (so autoroute keeps polling). Returns the text as
+// soon as a terminal {type:"result", subtype:"success"} event lands.
 async function extractFinalResult(runFile: string, sinceByte: number): Promise<string | null> {
   const file = Bun.file(runFile);
   if (!(await file.exists())) return null;
   const slice = await file.slice(sinceByte, file.size).text();
   // claude stream-json lines are mixed in with raw terminal junk (because
   // pipe-pane captures the rendered terminal). Find JSON objects.
-  let lastResult: string | null = null;
-  let lastAssistant: string | null = null;
   for (const line of slice.split("\n")) {
-    const idx = line.indexOf("{\"type\":\"");
+    const idx = line.indexOf('{"type":"result"');
     if (idx < 0) continue;
     const json = line.slice(idx);
     try {
       const e = JSON.parse(json);
       if (e.type === "result" && (e.subtype === "success" || (typeof e.subtype === "string" && e.subtype.startsWith("error")))) {
-        if (typeof e.result === "string") lastResult = e.result;
-      } else if (e.type === "assistant" && e.message && Array.isArray(e.message.content)) {
-        const text = e.message.content
-          .filter((c: any) => c?.type === "text" && typeof c.text === "string")
-          .map((c: any) => c.text)
-          .join("");
-        if (text) lastAssistant = text;
+        if (typeof e.result === "string" && e.result.trim()) return e.result.trim();
+        // result event with empty result — fall through to assistant scan
       }
-    } catch { /* malformed JSON line — skip */ }
+    } catch { /* truncated mid-stream; keep waiting */ }
   }
-  return (lastResult ?? lastAssistant ?? "").trim() || null;
+  // No terminal result event yet → not done. (Don't return last-assistant
+  // as a fallback; we want to wait for actual completion, not interim text.)
+  return null;
 }
 
 // Inject a multi-line message into the planner pane via tmux paste-buffer.
