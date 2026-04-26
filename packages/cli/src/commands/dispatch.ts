@@ -1,4 +1,4 @@
-import { findWorkspace, listPaneRecords, getPaneRecord, setPaneStatus, readConfig } from "@weaver/core";
+import { findWorkspace, listPaneRecords, getPaneRecord, setPaneStatus, setLastReviewedByte, readConfig } from "@weaver/core";
 import { sendKeys } from "@weaver/tmux";
 import { buildCodexCommand } from "@weaver/mcp-orchestrator";
 
@@ -84,6 +84,16 @@ export async function runDispatch(opts: DispatchOpts): Promise<void> {
     await sendKeys(pane.id, `cd ${shellQuote(opts.cwd)}`, true);
     await new Promise((r) => setTimeout(r, 150));
   }
+
+  // Reset the tail watermark to the current run-file size BEFORE sending the
+  // task. Otherwise `weave tail --wait-done` sees stale events from prior
+  // dispatches (or from when the same tmux pane id was reused across
+  // sessions) and exits early on an old turn-complete event. By recording the
+  // current end-of-file as our starting point, the next tail call reads only
+  // events emitted *after* this dispatch.
+  const runFile = Bun.file(pane.runFile);
+  const startByte = (await runFile.exists()) ? runFile.size : 0;
+  await setLastReviewedByte(pane.id, startByte);
 
   await sendKeys(pane.id, cmd, true);
   await setPaneStatus(pane.id, "running");

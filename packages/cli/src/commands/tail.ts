@@ -45,7 +45,12 @@ export async function runTail(opts: TailOpts): Promise<void> {
   }
 
   const file = pane.runFile;
-  let offset = opts.since ?? 0;
+  // Default the tail offset to the pane's lastReviewedByte (set by `weave
+  // dispatch` to the run-file size at dispatch time). This way, --wait-done
+  // only sees events from the current dispatch, not historical content left
+  // over from the same pane id being reused across sessions or from prior
+  // tasks on the same worker. --since explicit override wins.
+  let offset = opts.since ?? pane.lastReviewedByte ?? 0;
   let buf = "";
   let finalMessage: string | null = null;
   const slot = pane.workerNum != null ? `worker-${pane.workerNum}` : pane.id;
