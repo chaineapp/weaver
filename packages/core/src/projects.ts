@@ -98,7 +98,13 @@ async function uniqueProjectSlug(workspace: Workspace, name: string): Promise<st
 // stdio MCP servers don't advertise tools to the model. Until that's fixed
 // upstream, we route dispatch through the shell. The MCP server still exists
 // for memory + project-state reads, but workers are controlled via Bash.
-function buildPlannerBrief(project: ProjectRecord, workspace: Workspace): string {
+// Exported so `weave up` can regenerate CLAUDE.md/AGENTS.md from the latest
+// template every run. Briefs are product-owned (not user-owned) — user voice
+// + customization belongs in ~/.weave/USER.md, which is auto-appended via
+// claude's --append-system-prompt and survives. This way the planner always
+// gets the current orchestration rules without users having to recreate
+// projects when we ship brief changes.
+export function buildPlannerBrief(project: ProjectRecord, workspace: Workspace): string {
   const linear = project.linearTicket ? `\n- **Linear ticket**: ${project.linearTicket}` : "";
   const repos = Object.values(workspace.config.repos);
   const repoList = repos.length

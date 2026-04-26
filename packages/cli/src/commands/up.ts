@@ -1,4 +1,5 @@
-import { findWorkspace, getProject, listProjects, readConfig, readUserMd, upsertPaneRecord, weavePaths } from "@weaver/core";
+import { findWorkspace, getProject, listProjects, readConfig, readUserMd, upsertPaneRecord, weavePaths, buildPlannerBrief, workspacePaths } from "@weaver/core";
+import { join } from "node:path";
 import { hasSession, newSession, listPanes, openGhostty, openGhosttyTab, isInsideGhostty, buildPlannerLayout, selectPane, setStatusLeft, installWeaverMenu, sendKeys, pipePane } from "@weaver/tmux";
 import { playBanner } from "../banner.ts";
 
@@ -76,8 +77,17 @@ export async function runUp(opts: { project?: string; panes: number; bypass?: bo
   // CLAUDE.md that createProject wrote. The file tells the planner to call
   // current_project and list_memories at start-of-session, and to prefer
   // Weaver memory over Claude Code's built-in auto-memory.
-  const { join } = await import("node:path");
   const plannerCwd = join(ws.weaveDir, "projects", project.id);
+
+  // Always regenerate the per-project orchestration brief on weave up.
+  // CLAUDE.md / AGENTS.md are product-owned (planner instructions, dispatch
+  // primitives) — user-owned voice/prefs belong in ~/.weave/USER.md instead.
+  // Without this, projects created before a brief update keep teaching the
+  // planner about MCP tools that don't reach the model (CHA-1012), causing
+  // the planner to either silently do work in pane 0 or invent its own path.
+  const briefContent = buildPlannerBrief(project, ws);
+  await Bun.write(join(plannerCwd, "CLAUDE.md"), briefContent);
+  await Bun.write(join(plannerCwd, "AGENTS.md"), briefContent);
 
   // Resolve planner flags. Precedence: explicit --bypass flag > WEAVER_CLAUDE_BYPASS env > ~/.weave/config.json > off.
   // Planner binary precedence: project.plannerBinary > config > "claude".
