@@ -19,6 +19,10 @@ export type WeavePaths = {
   runsDir: string;                   // ~/.weave/runs/
   runFile: (paneId: string) => string;
   memoryDir: string;                 // ~/.weave/memory/
+  // User-level voice / standing prefs / philosophy. Auto-injected into every
+  // planner session via --append-system-prompt. Inspired by openclaw's SOUL.md.
+  // Edit by hand; survives `weave clean`.
+  userMd: string;                    // ~/.weave/USER.md
 };
 
 export function weavePaths(): WeavePaths {
@@ -32,7 +36,17 @@ export function weavePaths(): WeavePaths {
     runsDir,
     runFile: (paneId: string) => join(runsDir, `${sanitizePaneId(paneId)}.jsonl`),
     memoryDir: join(weaveHome, "memory"),
+    userMd: join(weaveHome, "USER.md"),
   };
+}
+
+// Read ~/.weave/USER.md if present. Returns trimmed content, or null if the
+// file doesn't exist or is empty after trim.
+export async function readUserMd(): Promise<string | null> {
+  const file = Bun.file(weavePaths().userMd);
+  if (!(await file.exists())) return null;
+  const text = (await file.text()).trim();
+  return text.length > 0 ? text : null;
 }
 
 function sanitizePaneId(paneId: string): string {

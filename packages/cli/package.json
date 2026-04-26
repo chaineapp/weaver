@@ -8,7 +8,8 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "bun test"
+    "test": "bun test",
+    "eval": "WEAVER_RUN_EVALS=1 bun test test/e2e/"
   },
   "dependencies": {
     "@weaver/codex-adapter": "workspace:*",

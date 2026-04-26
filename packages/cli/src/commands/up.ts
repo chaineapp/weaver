@@ -1,4 +1,4 @@
-import { findWorkspace, getProject, listProjects, readConfig, upsertPaneRecord, weavePaths } from "@weaver/core";
+import { findWorkspace, getProject, listProjects, readConfig, readUserMd, upsertPaneRecord, weavePaths } from "@weaver/core";
 import { hasSession, newSession, listPanes, openGhostty, openGhosttyTab, isInsideGhostty, buildPlannerLayout, selectPane, setStatusLeft, installWeaverMenu, sendKeys, pipePane } from "@weaver/tmux";
 import { playBanner } from "../banner.ts";
 
@@ -6,18 +6,34 @@ import { playBanner } from "../banner.ts";
 // Exported for unit-testing — avoids re-running the whole CLI to check flags.
 // Bypass flag is only auto-added for `claude`; custom binaries must use
 // extraArgs to supply their own permission-skip equivalent.
+//
+// userMd: contents of ~/.weave/USER.md (Weaver product context + user voice).
+// When present and binary is claude, we append it via --append-system-prompt
+// so the planner sees it as part of its system prompt for every session.
+// For codex (no equivalent flag), we prepend it to extraArgs as a comment;
+// codex will see it on stdin and treat as initial context.
 export function buildPlannerCommand(opts: {
   binary?: string;
   bypass?: boolean;
   model?: string;
   extraArgs?: string;
+  userMd?: string;
 } = {}): string {
   const binary = opts.binary || "claude";
   const parts = [binary];
   if (opts.bypass && binary === "claude") parts.push("--dangerously-skip-permissions");
   if (opts.model) parts.push("--model", opts.model);
+  if (opts.userMd && binary === "claude") {
+    parts.push("--append-system-prompt", shellQuote(opts.userMd));
+  }
   if (opts.extraArgs) parts.push(opts.extraArgs);
   return parts.join(" ");
+}
+
+// Single-quote a string for safe inclusion in a shell command. Handles inner
+// single quotes by closing, escaping, reopening — standard POSIX trick.
+function shellQuote(s: string): string {
+  return `'${s.replace(/'/g, "'\\''")}'`;
 }
 
 // `weave up --project <id> --panes <workers>`:
@@ -69,11 +85,24 @@ export async function runUp(opts: { project?: string; panes: number; bypass?: bo
   const envBypass = process.env.WEAVER_CLAUDE_BYPASS === "1";
   const bypass = opts.bypass ?? envBypass ?? cfg?.planner?.bypass ?? false;
   const plannerBinary = project.plannerBinary ?? cfg?.planner?.binary ?? "claude";
+  // ~/.weave/USER.md (Weaver context + user voice) is auto-appended to the
+  // planner's system prompt. weave init writes a default stub; user edits it.
+  // Belt-and-suspenders: also create on first `weave up` for users who
+  // installed before USER.md existed (idempotent — never overwrites).
+  {
+    const { defaultUserMd } = await import("@weaver/core");
+    if (!(await Bun.file(weavePaths().userMd).exists())) {
+      await Bun.write(weavePaths().userMd, defaultUserMd());
+      console.log(`✓ scaffolded ${weavePaths().userMd} (edit to customize planner voice + standing prefs)`);
+    }
+  }
+  const userMd = await readUserMd();
   const plannerCmd = buildPlannerCommand({
     binary: plannerBinary,
     bypass,
     model: cfg?.planner?.model,
     extraArgs: cfg?.planner?.extraArgs,
+    userMd: userMd ?? undefined,
   });
 
   if (isFresh) {
@@ -139,6 +168,17 @@ export async function runUp(opts: { project?: string; panes: number; bypass?: bo
   // In-Ghostty control surface — F12 opens a menu with bypass toggles,
   // restart-planner, version, config list, and a custom `weave>` prompt.
   await installWeaverMenu();
+
+  // Eval / CI escape hatch: skip opening Ghostty when WEAVER_NO_GHOSTTY=1.
+  // The tmux session is still live and the planner is still running — useful
+  // for headless eval runs that drive the planner via tmux send-keys without
+  // popping a window onto the user's screen.
+  if (process.env.WEAVER_NO_GHOSTTY === "1") {
+    console.log(`\n✓ tmux session ${plannerSession} ready (Ghostty skipped — WEAVER_NO_GHOSTTY=1)`);
+    console.log(`  Attach manually with: tmux attach -t ${plannerSession}`);
+    console.log(`  MCP context: workspace=${ws.root}, project=${project.id}`);
+    return;
+  }
 
   // If we're already inside a Ghostty terminal, open this project as a TAB
   // in the current window — keeps everything in one window, tab title shows
