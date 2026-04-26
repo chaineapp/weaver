@@ -48,19 +48,31 @@ let liveSession: string | null = null;
 let liveWorkspace: string | null = null;
 
 afterEach(async () => {
+  // Surgical cleanup — kill ONLY this eval's session, not the user's tmux
+  // server. Never call `weave clean` here (that nukes everything weave-*
+  // including any live session the user is mid-task in).
   if (liveSession) {
-    Bun.spawn(["tmux", "kill-session", "-t", liveSession], { stdout: "ignore", stderr: "ignore" });
+    await Bun.spawn(["tmux", "kill-session", "-t", liveSession], {
+      stdout: "ignore",
+      stderr: "ignore",
+    }).exited;
     liveSession = null;
   }
   if (liveWorkspace) {
     await rm(liveWorkspace, { recursive: true, force: true }).catch(() => {});
     liveWorkspace = null;
   }
-  // Wipe the global pane registry of records we created (their workspaceRoot
-  // points at the temp dir we just deleted). Cheaper than surgical deletion.
+  // Surgical pane registry cleanup — only delete records belonging to this
+  // eval's temp workspace (paths under /tmp/weave-eval-*). The user's panes
+  // (workspaceRoot like /Users/pom/Code) stay untouched.
   Bun.spawn(["bun", "run", "-e", `
-    import { weavePaths } from "./packages/core/src/index.ts";
-    await Bun.write(weavePaths().panes, JSON.stringify({ version: 2, panes: {} }, null, 2) + "\\n");
+    import { listPaneRecords, removePaneRecord } from "./packages/core/src/index.ts";
+    const all = await listPaneRecords();
+    for (const p of all) {
+      if (p.workspaceRoot && (p.workspaceRoot.includes("weave-eval-") || p.workspaceRoot.startsWith("/tmp/") || p.workspaceRoot.startsWith("/var/folders/"))) {
+        await removePaneRecord(p.id);
+      }
+    }
   `], { stdout: "ignore", stderr: "ignore", cwd: process.cwd() });
 });
 
@@ -72,10 +84,15 @@ async function setupEvalProject(opts: { name: string; panes: number; planner: st
   await runCli(["workspace", "init", wsRoot]);
   await runCli(["new", "--name", opts.name, "--planner", opts.planner, "--no-up"], { cwd: wsRoot });
 
-  // weave up — WEAVER_NO_GHOSTTY skips the window pop. tmux session is live.
+  // weave up — WEAVER_NO_GHOSTTY skips the window pop, WEAVER_NO_AUTOROUTE
+  // skips the autoroute daemon (eval doesn't need it; it drives the planner
+  // via tmux send-keys directly). Uses the user's tmux server (same one
+  // their live session might be on) — afterEach is surgical and only kills
+  // this eval's specific session + its pane records, never `weave clean`,
+  // so the user's session is unaffected.
   await runCli(["up", "--project", opts.name, "--panes", String(opts.panes)], {
     cwd: wsRoot,
-    env: { WEAVER_NO_GHOSTTY: "1" },
+    env: { WEAVER_NO_GHOSTTY: "1", WEAVER_NO_AUTOROUTE: "1" },
   });
 
   const session = `weave-${opts.name}`;

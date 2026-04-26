@@ -15,9 +15,12 @@
 //          <prompt for worker 2>
 //          @@END
 //
-//   3. autoroute (this daemon) tails the planner's run file, ANSI-strips,
-//      and detects new @@DISPATCH ... @@END blocks once the planner's turn
-//      is stable (the file has stopped growing for a beat).
+//   3. autoroute (this daemon) tails Claude Code's session log at
+//      ~/.claude/projects/<encoded-cwd>/<sessionid>.jsonl. That log has
+//      clean structured assistant turns — far better than pipe-paning the
+//      TUI, which captures rendered terminal output (overwrite-each-other
+//      cursor moves, multiple copies of the same text mid-stream, etc.)
+//      and ate ~half the @@DISPATCH markers.
 //   4. For each block, autoroute runs `weave dispatch worker-N "<prompt>"`
 //      with the planner's WEAVER_AUTOROUTE_CWD (defaults to ~/Code/weaver)
 //      so the worker runs in the right repo.
@@ -41,12 +44,38 @@
 // The whole point: the user just speaks to the planner. No manual `weave
 // dispatch` / `weave tail` Bash. autoroute does the wire-up.
 
-import { findWorkspace, getProject, listPaneRecords, getPaneRecord, weavePaths } from "@weaver/core";
+import { findWorkspace, getProject, listPaneRecords, getPaneRecord, weavePaths, workspacePaths } from "@weaver/core";
 import { runDispatch } from "./dispatch.ts";
-import { writeFileSync } from "node:fs";
+import { writeFileSync, readdirSync, statSync } from "node:fs";
+import { join, resolve as resolvePath } from "node:path";
+import { homedir } from "node:os";
 
-const ANSI_RE = /\x1b\[[0-9;?]*[A-Za-z]|\x1b\][^\x07]*\x07|\x1b[()][AB012]|\r/g;
 const DISPATCH_RE = /@@DISPATCH\s+(worker-\d+)\s*\n([\s\S]*?)\n@@END/g;
+
+// Claude Code encodes the planner's cwd into a flat dirname under
+// ~/.claude/projects/. Rule (verified empirically): every non-alphanumeric
+// char becomes `-`. So /Users/pom/Code/.weaver/projects/weave becomes
+// -Users-pom-Code--weaver-projects-weave (note the `--` from the leading `.`).
+function claudeProjectDir(cwd: string): string {
+  return join(homedir(), ".claude", "projects", cwd.replace(/[^A-Za-z0-9]/g, "-"));
+}
+
+// Find the newest *.jsonl in a Claude project dir. Claude makes a new file
+// per session id; tailing the newest gives us the live conversation.
+function newestSessionLog(dir: string): string | null {
+  try {
+    const entries = readdirSync(dir).filter((f) => f.endsWith(".jsonl"));
+    if (entries.length === 0) return null;
+    let newest = "";
+    let newestMtime = 0;
+    for (const f of entries) {
+      const full = join(dir, f);
+      const m = statSync(full).mtimeMs;
+      if (m > newestMtime) { newestMtime = m; newest = full; }
+    }
+    return newest || null;
+  } catch { return null; }
+}
 
 export type AutorouteOpts = {
   project: string;
@@ -71,31 +100,16 @@ export async function runAutoroute(opts: AutorouteOpts): Promise<void> {
   const binary = opts.binary ?? "claude";
   const logPrefix = `[autoroute ${project.id}]`;
 
-  // Find planner pane (idx 0). Its run file is in panes.json once `weave up`
-  // pipe-paned it. Until then, fall back to scanning ~/.weave/runs/.
-  let plannerRunFile: string | null = null;
-  for (let i = 0; i < 20; i++) {
-    const all = await listPaneRecords({ projectId: project.id });
-    // Planner is the pane in this project that ISN'T a numbered worker.
-    // We registered the planner via pipePane in up.ts but it doesn't have a
-    // PaneRecord — only workers do. So we resolve via tmux.
-    const tmuxPanes = await tmuxList(session);
-    const planner = tmuxPanes.find((p) => p.idx === 0);
-    if (planner) {
-      plannerRunFile = weavePaths().runFile(planner.id);
-      break;
-    }
-    await sleep(500);
-  }
-  if (!plannerRunFile) {
-    console.error(`${logPrefix} could not find planner pane in ${session}`);
-    process.exit(1);
-  }
-  console.log(`${logPrefix} watching ${plannerRunFile}`);
+  // Where claude logs the planner's conversation. Planner cwd is the project
+  // folder under workspace/.weaver/projects/<id> (set by `weave up`).
+  const plannerCwd = join(workspacePaths(ws.root).projectsDir, project.id);
+  const claudeLogDir = claudeProjectDir(plannerCwd);
+  console.log(`${logPrefix} watching claude session logs in ${claudeLogDir}`);
 
   // Track which dispatch-block hashes we've already processed so the same
-  // block in a re-rendered TUI capture doesn't fire twice.
+  // block scanned across many polls doesn't fire twice.
   const processed = new Set<string>();
+  let lastLogPath: string | null = null;
   let lastSize = 0;
   let stableSince = 0;
 
@@ -104,11 +118,19 @@ export async function runAutoroute(opts: AutorouteOpts): Promise<void> {
       console.log(`${logPrefix} session ${session} gone; exiting`);
       return;
     }
-    const file = Bun.file(plannerRunFile);
-    if (!(await file.exists())) {
+    // Always scan for the newest session log — claude makes a new file when
+    // the user starts a new session via /clear or restart.
+    const logPath = newestSessionLog(claudeLogDir);
+    if (!logPath) {
       await sleep(2000);
       continue;
     }
+    if (logPath !== lastLogPath) {
+      console.log(`${logPrefix} switched to ${logPath}`);
+      lastLogPath = logPath;
+      lastSize = 0;
+    }
+    const file = Bun.file(logPath);
     const size = file.size;
     const grew = size !== lastSize;
     lastSize = size;
@@ -123,8 +145,22 @@ export async function runAutoroute(opts: AutorouteOpts): Promise<void> {
       continue;
     }
 
+    // Parse the session log: one JSON event per line. Pull text from
+    // assistant turns. Run DISPATCH_RE over the assembled assistant text.
     const raw = await file.text();
-    const clean = stripAnsi(raw);
+    const assistantText: string[] = [];
+    for (const line of raw.split("\n")) {
+      if (!line.trim()) continue;
+      try {
+        const e = JSON.parse(line);
+        if (e.type === "assistant" && e.message && Array.isArray(e.message.content)) {
+          for (const c of e.message.content) {
+            if (c?.type === "text" && typeof c.text === "string") assistantText.push(c.text);
+          }
+        }
+      } catch { /* malformed line — skip */ }
+    }
+    const clean = assistantText.join("\n\n");
     const blocks = [...clean.matchAll(DISPATCH_RE)].map((m) => ({
       worker: m[1]!,
       prompt: m[2]!.trim(),
@@ -192,10 +228,6 @@ export async function runAutoroute(opts: AutorouteOpts): Promise<void> {
 }
 
 // ───── helpers ─────
-
-function stripAnsi(s: string): string {
-  return s.replace(ANSI_RE, "");
-}
 
 function hash(s: string): string {
   // Cheap deterministic hash so we can dedupe without crypto.
