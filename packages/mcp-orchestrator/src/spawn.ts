@@ -74,7 +74,13 @@ export function buildCodexCommand(
     if (opts.bypass) parts.push("--dangerously-bypass-approvals-and-sandbox");
     if (opts.model) parts.push("--model", shellQuote(opts.model));
   } else if (binary === "claude") {
-    parts = ["claude", "-p"];
+    // claude -p with stream-json output emits proper JSONL we can parse for
+    // turn-complete events. Without --output-format stream-json, claude prints
+    // plain rendered text and `weave tail --wait-done` has nothing to grab on
+    // to. claude requires --verbose when --output-format=stream-json (per
+    // claude's own validation). The pipe-paned terminal still captures all of
+    // it; tail.ts knows both shapes.
+    parts = ["claude", "-p", "--output-format", "stream-json", "--verbose"];
     if (opts.bypass) parts.push("--dangerously-skip-permissions");
     if (opts.model) parts.push("--model", shellQuote(opts.model));
   } else {

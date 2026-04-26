@@ -9,9 +9,13 @@ import { buildCodexCommand } from "@weaver/mcp-orchestrator";
 //   - "<paneid>" — same
 //
 // On dispatch:
-//   1. Build the worker command (codex by default; --binary overrides per call)
-//   2. tmux send-keys → the pane runs `codex exec --json '<task>'` (or whatever)
-//   3. Set pane status to "running"
+//   1. (optional) `cd <opts.cwd>` in the pane so the worker's claude/codex
+//       picks up that path as its primary directory — needed when the work is
+//       in a worktree separate from where `weave up` was run, otherwise
+//       claude's Edit tool refuses to write outside its launch cwd.
+//   2. Build the worker command (codex by default; --binary overrides per call)
+//   3. tmux send-keys → the pane runs `codex exec --json '<task>'` (or whatever)
+//   4. Set pane status to "running"
 //
 // The worker's output streams to ~/.weave/runs/<paneid>.jsonl via the
 // `pipe-pane` set up at `weave up` time. The user (or planner) follows up with
@@ -27,6 +31,7 @@ export type DispatchOpts = {
   binary?: string;   // override worker.binary just for this dispatch
   model?: string;    // override worker.model just for this dispatch
   bypass?: boolean;
+  cwd?: string;      // cd the worker pane here before running the task
 };
 
 export async function runDispatch(opts: DispatchOpts): Promise<void> {
@@ -68,14 +73,30 @@ export async function runDispatch(opts: DispatchOpts): Promise<void> {
     extraArgs: cfg?.worker?.extraArgs,
   });
 
+  // If the planner asked for a specific cwd (e.g. a fresh worktree), cd the
+  // pane there first. claude treats its launch cwd as the "primary directory"
+  // for Edit-tool sandboxing, so without this the worker can't write to a
+  // different path than wherever `weave up` started the pane (typically the
+  // project folder). Sleep a beat after cd so the prompt redraws before we
+  // type the next command — without it the keystrokes can race the redraw and
+  // get interpreted as part of the prompt.
+  if (opts.cwd) {
+    await sendKeys(pane.id, `cd ${shellQuote(opts.cwd)}`, true);
+    await new Promise((r) => setTimeout(r, 150));
+  }
+
   await sendKeys(pane.id, cmd, true);
   await setPaneStatus(pane.id, "running");
 
   const slot = pane.workerNum != null ? `worker-${pane.workerNum}` : pane.id;
-  console.log(`✓ dispatched to ${slot} (${pane.id}, ${binary})`);
+  console.log(`✓ dispatched to ${slot} (${pane.id}, ${binary}${opts.cwd ? `, cwd=${opts.cwd}` : ""})`);
   console.log(`  task: ${opts.task}`);
   console.log(`  follow output: weave tail ${slot} --follow`);
   console.log(`  wait until done: weave tail ${slot} --wait-done`);
+}
+
+function shellQuote(s: string): string {
+  return `'${s.replace(/'/g, "'\\''")}'`;
 }
 
 async function resolveWorker(token: string, workspaceRoot: string) {

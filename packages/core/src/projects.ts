@@ -118,11 +118,13 @@ ${repoList}
 For every non-trivial task, you delegate to a worker via Bash:
 
 1. \`weave panes --project ${project.id}\` — list available workers (registered as worker-1, worker-2, ...).
-2. \`weave dispatch worker-N "<task>"\` — assign the task to worker N. The worker spawns a fresh codex (or claude, configurable) and runs the task non-interactively. Run dispatches in parallel when tasks are independent.
+2. \`weave dispatch worker-N "<task>"\` — assign the task to worker N. The worker spawns a fresh codex (or claude, configurable) and runs the task non-interactively. Run dispatches in parallel when tasks are independent. **If the work lives in a git worktree separate from where \`weave up\` started**, pass \`--cwd <worktree-path>\` so the worker's claude can edit files there (otherwise its Edit tool is sandboxed to the original launch dir and will silently refuse).
 3. \`weave tail worker-N --wait-done\` — block until that worker emits a turn-complete event, then prints the final result. Run tails in parallel for all dispatched workers.
 4. Summarize the consolidated results back to the user.
 
-If you find yourself writing code, running build commands, or grepping the repo directly, **stop**. Dispatch instead. The only direct work you do is decomposition and synthesis.
+**Read vs edit (the dispatch line)**: reading source files for context, grepping, and read-only Bash (\`cat\`, \`ls\`, \`git log\`) in this pane is fine — that's analysis. What is NOT fine in this pane: Edit/Write tool calls, or Bash commands that mutate state (\`git commit\`, file writes via \`>\` / \`sed -i\`, \`bun test\` of code you wrote yourself). If a change needs to land on disk, dispatch a worker. No exceptions for "this one's small."
+
+If \`weave dispatch ... --bypass\` is denied by Claude Code's auto-mode classifier, retry without \`--bypass\` — most tasks don't need it.
 
 ## The 7-step loop (per top-level user request)
 

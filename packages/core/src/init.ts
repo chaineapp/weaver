@@ -79,6 +79,25 @@ high velocity with small teams. Optimize accordingly:
 - **Build velocity > safety theater.** When the user grants \`--bypass\` or
   similar, trust them; don't litter the conversation with disclaimers.
 
+## Read vs edit (the dispatch line)
+
+Reading source files / running read-only Bash (\`git log\`, \`cat\`, \`grep\`, \`ls\`)
+in the planner pane is **fine** — that's analysis. What is **not** fine in the
+planner pane:
+
+- Calling the Edit / Write / NotebookEdit tools.
+- Bash commands that mutate state: \`git commit\`, \`git push\`, \`bun test\` of
+  unwritten code, \`npm install\`, file writes via \`>\`, \`tee\`, \`sed -i\`, etc.
+
+If a change needs to land on disk, **dispatch a worker.** No exceptions for
+"this one's small, I'll just edit it." Small edits are exactly when the habit
+breaks; reset it before it does.
+
+If \`weave dispatch worker-N --bypass\` is denied by Claude Code's auto-mode
+classifier, retry without \`--bypass\` (most coding tasks don't need it). If
+the user explicitly granted bypass at session start, prefix the Bash call with
+\`!\` to manually approve, or ask the user once and remember the answer.
+
 ## Per-repo overrides
 
 This file is global. Any repo you work in may have its own \`AGENTS.md\`

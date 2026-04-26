@@ -12,6 +12,12 @@ export type PaneInfo = {
   pid: number;
   active: boolean;
   title: string;
+  // Foreground process command in the pane (the basename of argv[0] tmux sees,
+  // e.g. "claude", "codex", "zsh"). Used by `weave up` to verify the planner
+  // binary actually started — codex with a stale Node, claude with a missing
+  // API key, etc. all exit silently and tmux closes the pane, leaving us with
+  // a workers-only session that LOOKS healthy in the success log.
+  currentCommand: string;
 };
 
 async function runTmux(args: string[]): Promise<{ stdout: string; stderr: string; code: number }> {
@@ -149,20 +155,21 @@ export async function killPane(paneId: string): Promise<void> {
 }
 
 export async function listPanes(session: string): Promise<PaneInfo[]> {
-  const format = "#{pane_id}|#{pane_index}|#{window_index}|#{pane_pid}|#{pane_active}|#{pane_title}";
+  const format = "#{pane_id}|#{pane_index}|#{window_index}|#{pane_pid}|#{pane_active}|#{pane_current_command}|#{pane_title}";
   const stdout = await runOrThrow(["list-panes", "-s", "-t", session, "-F", format]);
   const panes: PaneInfo[] = [];
   for (const line of stdout.split("\n")) {
     if (!line.trim()) continue;
     const parts = line.split("|");
-    if (parts.length < 6) continue;
+    if (parts.length < 7) continue;
     panes.push({
       paneId: parts[0]!,
       paneIndex: Number(parts[1]),
       windowIndex: Number(parts[2]),
       pid: Number(parts[3]),
       active: parts[4] === "1",
-      title: parts.slice(5).join("|"),
+      currentCommand: parts[5]!,
+      title: parts.slice(6).join("|"),
     });
   }
   return panes;

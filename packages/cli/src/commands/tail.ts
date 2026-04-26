@@ -106,21 +106,36 @@ export async function runTail(opts: TailOpts): Promise<void> {
 function isTerminal(e: any): boolean {
   if (!e || typeof e.type !== "string") return false;
   return (
+    // codex event names
     e.type === "turn.completed" ||
     e.type === "task_complete" ||
     e.type === "task.completed" ||
-    e.type === "session.completed"
+    e.type === "session.completed" ||
+    // claude --output-format stream-json — emits one final {type:"result", subtype:"success"|"error_*", ...}
+    (e.type === "result" && (e.subtype === "success" || (typeof e.subtype === "string" && e.subtype.startsWith("error"))))
   );
 }
 
-// Pull the final assistant text out of a codex event. Codex JSON shapes vary
-// across versions — we accept the common ones and fall back to raw.
+// Pull the final assistant text out of a codex / claude event. Shapes vary
+// across binaries and versions — accept the known ones, fall back to raw.
 function extractAssistantMessage(e: any): string | null {
   if (!e) return null;
+  // codex
   if (e.type === "agent_message" && typeof e.text === "string") return e.text.trim();
   if (e.type === "item.completed" && e.item && typeof e.item.text === "string") return e.item.text.trim();
-  if (e.type === "raw" && typeof e.text === "string") return e.text.trim();
   if (e.type === "turn.completed" && e.message && typeof e.message.content === "string") return e.message.content.trim();
+  // claude stream-json: terminal `result` carries the final string in .result
+  if (e.type === "result" && typeof e.result === "string") return e.result.trim();
+  // claude stream-json: assistant turns carry text in .message.content[].text
+  if (e.type === "assistant" && e.message && Array.isArray(e.message.content)) {
+    const text = e.message.content
+      .filter((c: any) => c?.type === "text" && typeof c.text === "string")
+      .map((c: any) => c.text)
+      .join("");
+    if (text) return text.trim();
+  }
+  // raw / unparsed
+  if (e.type === "raw" && typeof e.text === "string") return e.text.trim();
   return null;
 }
 

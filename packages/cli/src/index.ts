@@ -46,7 +46,8 @@ CONFIG (defaults read by every weave up / spawn_pane)
 
 DISPATCH (Bash-driven worker control — see CHA-1012)
   weave dispatch worker-N "<task>"    fire a task at a worker pane (parallel-safe)
-                                      [--binary X] [--model Y] [--bypass]
+                                      [--binary X] [--model Y] [--bypass] [--cwd PATH]
+                                      --cwd: cd the pane there first (use for worktrees)
   weave tail worker-N [--follow] [--wait-done]
                                       stream a worker's run file, optionally
                                       block until codex emits a turn-complete event
@@ -205,7 +206,7 @@ async function main() {
       // Example: weave dispatch worker-1 "what is 1+1, reply with just the number"
       // The task can be the rest of argv joined with spaces (no need to quote
       // for the user, but quoting works too).
-      let values: { binary?: string; model?: string; bypass?: boolean };
+      let values: { binary?: string; model?: string; bypass?: boolean; cwd?: string };
       let positionals: string[];
       try {
         const parsed = parseArgs({
@@ -214,6 +215,7 @@ async function main() {
             binary: { type: "string" },
             model: { type: "string" },
             bypass: { type: "boolean" },
+            cwd: { type: "string" },
           },
           strict: true,
           allowPositionals: true,
@@ -222,16 +224,16 @@ async function main() {
         positionals = parsed.positionals;
       } catch (err) {
         console.error(`error: ${(err as Error).message}`);
-        console.error(`usage: weave dispatch <worker-N | %paneid> <task...> [--binary X] [--model Y] [--bypass]`);
+        console.error(`usage: weave dispatch <worker-N | %paneid> <task...> [--binary X] [--model Y] [--bypass] [--cwd PATH]`);
         process.exit(1);
       }
       const [worker, ...taskParts] = positionals;
       const task = taskParts.join(" ").trim();
       if (!worker || !task) {
-        console.error("usage: weave dispatch <worker-N | %paneid> <task...> [--binary X] [--model Y] [--bypass]");
+        console.error("usage: weave dispatch <worker-N | %paneid> <task...> [--binary X] [--model Y] [--bypass] [--cwd PATH]");
         process.exit(1);
       }
-      await runDispatch({ worker, task, binary: values.binary, model: values.model, bypass: values.bypass });
+      await runDispatch({ worker, task, binary: values.binary, model: values.model, bypass: values.bypass, cwd: values.cwd });
       return;
     }
 

@@ -106,7 +106,7 @@ This block intentionally mirrors `~/.weave/USER.md`. Dogfooding case: when a Wea
 If you're a planner running inside `weave up` and the project under work IS the weaver repo itself, dispatch primitives are unchanged — just used on Weaver code:
 
 - `Bash: weave panes [--project ID]` — list workers
-- `Bash: weave dispatch worker-N "<task>" [--binary claude|codex] [--bypass]` — assign work
+- `Bash: weave dispatch worker-N "<task>" [--binary claude|codex] [--bypass] [--cwd PATH]` — assign work. Use `--cwd <worktree-path>` whenever the work is in a worktree separate from where `weave up` was started; without it, the worker's claude refuses to edit files outside its launch dir.
 - `Bash: weave tail worker-N [--follow] [--wait-done]` — read worker output
 - `Bash: bun run eval` — verify the dispatch substrate still works after a change
 

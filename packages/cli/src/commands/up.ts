@@ -117,6 +117,29 @@ export async function runUp(opts: { project?: string; panes: number; bypass?: bo
     });
     console.log(`✓ started planner tmux session ${plannerSession}${bypass ? " (bypass permissions ON)" : ""}`);
 
+    // CHA-1150: verify the planner binary actually started. tmux happily
+    // creates a session even if the launch command exits immediately (e.g.
+    // codex broken by a stale Node in PATH, claude missing API key, binary
+    // not installed). The pane closes silently and we'd lay out workers in a
+    // session with no planner. Sleep a beat so the binary has a chance to
+    // exec, then check what tmux thinks is running in pane 0.
+    await new Promise((r) => setTimeout(r, 500));
+    const initialPanes = await listPanes(plannerSession);
+    const planner0 = initialPanes.find((p) => p.paneIndex === 0);
+    const isShell = (cmd: string) => /^(bash|zsh|fish|sh|ash|dash|ksh)$/i.test(cmd);
+    if (!planner0) {
+      throw new Error(
+        `planner '${plannerBinary}' didn't start — pane 0 in session ${plannerSession} no longer exists. ` +
+        `The binary likely exited immediately. Try running '${plannerBinary} --version' to debug.`,
+      );
+    }
+    if (isShell(planner0.currentCommand)) {
+      throw new Error(
+        `planner '${plannerBinary}' didn't start — pane 0 is running '${planner0.currentCommand}', not '${plannerBinary}'. ` +
+        `The binary likely exited immediately and tmux fell back to your shell. Try '${plannerBinary} --version' to debug.`,
+      );
+    }
+
     const workerPanes = await buildPlannerLayout(plannerSession, opts.panes, { cwd: plannerCwd });
 
     // Register every layout pane in the global pane registry so:
