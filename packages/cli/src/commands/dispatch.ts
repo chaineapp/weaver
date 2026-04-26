@@ -1,4 +1,4 @@
-import { findWorkspace, listPaneRecords, getPaneRecord, setPaneStatus, setLastReviewedByte, readConfig } from "@weaver/core";
+import { findWorkspace, listPaneRecords, getPaneRecord, beginDispatch, readConfig } from "@weaver/core";
 import { sendKeys } from "@weaver/tmux";
 import { buildCodexCommand } from "@weaver/mcp-orchestrator";
 
@@ -90,17 +90,18 @@ export async function runDispatch(opts: DispatchOpts): Promise<void> {
   }
 
   // Reset the tail watermark to the current run-file size BEFORE sending the
-  // task. Otherwise `weave tail --wait-done` sees stale events from prior
-  // dispatches (or from when the same tmux pane id was reused across
-  // sessions) and exits early on an old turn-complete event. By recording the
-  // current end-of-file as our starting point, the next tail call reads only
-  // events emitted *after* this dispatch.
+  // task — atomically combined with flipping status to "running" so 4
+  // parallel dispatches can't clobber each other's byte updates. Without
+  // this, `weave tail --wait-done` reads stale events from prior dispatches
+  // and exits early on an old turn-complete event.
   const runFile = Bun.file(pane.runFile);
   const startByte = (await runFile.exists()) ? runFile.size : 0;
-  await setLastReviewedByte(pane.id, startByte);
+  await beginDispatch(pane.id, startByte);
 
   await sendKeys(pane.id, cmd, true);
-  await setPaneStatus(pane.id, "running");
+  // Status was already flipped to "running" in beginDispatch above; no
+  // separate setPaneStatus call needed here. Combining them removes the
+  // last-known race between parallel dispatches.
 
   const slot = pane.workerNum != null ? `worker-${pane.workerNum}` : pane.id;
   console.log(`✓ dispatched to ${slot} (${pane.id}, ${binary}${targetCwd ? `, cwd=${targetCwd}` : ""})`);
