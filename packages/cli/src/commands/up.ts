@@ -37,6 +37,33 @@ function shellQuote(s: string): string {
   return `'${s.replace(/'/g, "'\\''")}'`;
 }
 
+// Detached-spawn `weave autoroute --project X` if no autoroute is already
+// running for that project. PID file under ~/.weave/autoroute-<projectId>.pid
+// so we can detect existing watchers across `weave up` retries.
+async function spawnAutorouteIfMissing(projectId: string): Promise<void> {
+  const { weavePaths: wp } = await import("@weaver/core");
+  const pidPath = `${wp().weaveHome}/autoroute-${projectId}.pid`;
+  // If pidfile exists and process is alive, skip.
+  if (await Bun.file(pidPath).exists()) {
+    const pid = parseInt((await Bun.file(pidPath).text()).trim(), 10);
+    if (Number.isFinite(pid)) {
+      const alive = (await Bun.spawn(["kill", "-0", String(pid)], { stdout: "ignore", stderr: "ignore" }).exited) === 0;
+      if (alive) {
+        console.log(`✓ autoroute already running (pid ${pid}, ${pidPath})`);
+        return;
+      }
+    }
+  }
+  // Spawn detached. nohup+disown via shell so this process can exit and the
+  // daemon survives. stdout/stderr go to a log so we can debug.
+  const logPath = `${wp().weaveHome}/autoroute-${projectId}.log`;
+  const cmd = `nohup weave autoroute --project ${shellQuote(projectId)} > ${shellQuote(logPath)} 2>&1 &
+echo $! > ${shellQuote(pidPath)}
+disown 2>/dev/null || true`;
+  await Bun.spawn(["bash", "-lc", cmd], { stdout: "ignore", stderr: "ignore" }).exited;
+  console.log(`✓ spawned autoroute watcher (logs: ${logPath})`);
+}
+
 // `weave up --project <id> --panes <workers>`:
 //   - creates tmux session weave-<id> if missing, pane 0 runs `claude`
 //   - builds a planner-left + workers-grid-right layout on first creation
@@ -147,6 +174,12 @@ export async function runUp(opts: { project?: string; panes: number; bypass?: bo
     }
     console.log(`✓ started planner tmux session ${plannerSession}${bypass ? " (bypass permissions ON)" : ""}`);
 
+    // Pipe-pane the planner so the autoroute watcher can read its output.
+    // Pane 0 is always paneIndex 0 of the new session. We don't have its
+    // tmux pane id yet — listPanes will surface it next.
+    // Done before the verification check below so the file is set up by the
+    // time autoroute starts.
+
     // Even if newSession returned cleanly, the planner could have exited
     // between then and now. Sleep a beat so the binary has a chance to exec,
     // then check what tmux thinks is running in pane 0. If it's a shell or
@@ -176,6 +209,12 @@ export async function runUp(opts: { project?: string; panes: number; bypass?: bo
         `  The binary likely exited immediately and tmux fell back to your shell. Try: ${plannerBinary} --version`,
       );
     }
+
+    // Pipe-pane the planner pane to a run file, same as workers. The autoroute
+    // watcher tails this file to detect structured @@DISPATCH blocks the
+    // planner emits, parses them, and routes to workers automatically.
+    const plannerRunFile = weavePaths().runFile(planner0.paneId);
+    await pipePane(planner0.paneId, plannerRunFile);
 
     const workerPanes = await buildPlannerLayout(plannerSession, opts.panes, { cwd: plannerCwd });
 
@@ -228,6 +267,16 @@ export async function runUp(opts: { project?: string; panes: number; bypass?: bo
   // In-Ghostty control surface — F12 opens a menu with bypass toggles,
   // restart-planner, version, config list, and a custom `weave>` prompt.
   await installWeaverMenu();
+
+  // Spawn the autoroute watcher in the background — daemon process that
+  // tails the planner's output, parses @@DISPATCH blocks, dispatches workers,
+  // collects results, and injects them back into the planner pane as a user
+  // message. Lets the user just talk to the planner without manually
+  // shelling out to weave dispatch / weave tail.
+  // Skip if WEAVER_NO_AUTOROUTE=1 (eval mode) or already running.
+  if (process.env.WEAVER_NO_AUTOROUTE !== "1") {
+    await spawnAutorouteIfMissing(project.id);
+  }
 
   // Eval / CI escape hatch: skip opening Ghostty when WEAVER_NO_GHOSTTY=1.
   // The tmux session is still live and the planner is still running — useful
