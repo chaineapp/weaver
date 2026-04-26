@@ -106,37 +106,64 @@ export async function runUp(opts: { project?: string; panes: number; bypass?: bo
   });
 
   if (isFresh) {
-    await newSession({
-      name: plannerSession,
-      cwd: plannerCwd,
-      command: plannerCmd,
-      env: {
-        WEAVER_WORKSPACE_ROOT: ws.root,
-        WEAVER_PROJECT_ID: project.id,
-      },
-    });
+    // CHA-1150: wrap newSession + the verification check together. If the
+    // planner binary exits immediately (broken Node for codex, missing API
+    // key for claude, binary not installed at all), tmux closes the only
+    // pane, the session dies, and downstream tmux calls (set-option mouse on,
+    // etc.) fail with "server exited unexpectedly". We catch any of those
+    // and re-throw with a friendlier "try '<binary> --version'" hint that
+    // points at the real cause.
+    try {
+      await newSession({
+        name: plannerSession,
+        cwd: plannerCwd,
+        command: plannerCmd,
+        env: {
+          WEAVER_WORKSPACE_ROOT: ws.root,
+          WEAVER_PROJECT_ID: project.id,
+        },
+      });
+    } catch (err) {
+      const msg = (err as Error).message;
+      if (/server exited|can't find session|no server running/.test(msg)) {
+        throw new Error(
+          `planner '${plannerBinary}' exited immediately on launch — the tmux session died before Weaver could finish setup.\n` +
+          `  Most likely: '${plannerBinary}' isn't on PATH, or it crashed on startup (missing API key, broken Node version, etc.).\n` +
+          `  Debug with: ${plannerBinary} --version\n` +
+          `  Underlying error: ${msg}`,
+        );
+      }
+      throw err;
+    }
     console.log(`✓ started planner tmux session ${plannerSession}${bypass ? " (bypass permissions ON)" : ""}`);
 
-    // CHA-1150: verify the planner binary actually started. tmux happily
-    // creates a session even if the launch command exits immediately (e.g.
-    // codex broken by a stale Node in PATH, claude missing API key, binary
-    // not installed). The pane closes silently and we'd lay out workers in a
-    // session with no planner. Sleep a beat so the binary has a chance to
-    // exec, then check what tmux thinks is running in pane 0.
+    // Even if newSession returned cleanly, the planner could have exited
+    // between then and now. Sleep a beat so the binary has a chance to exec,
+    // then check what tmux thinks is running in pane 0. If it's a shell or
+    // the pane is gone, the planner died — same friendly error.
     await new Promise((r) => setTimeout(r, 500));
-    const initialPanes = await listPanes(plannerSession);
+    let initialPanes;
+    try {
+      initialPanes = await listPanes(plannerSession);
+    } catch (err) {
+      throw new Error(
+        `planner '${plannerBinary}' exited immediately — session ${plannerSession} no longer exists.\n` +
+        `  Try: ${plannerBinary} --version\n` +
+        `  Underlying error: ${(err as Error).message}`,
+      );
+    }
     const planner0 = initialPanes.find((p) => p.paneIndex === 0);
     const isShell = (cmd: string) => /^(bash|zsh|fish|sh|ash|dash|ksh)$/i.test(cmd);
     if (!planner0) {
       throw new Error(
-        `planner '${plannerBinary}' didn't start — pane 0 in session ${plannerSession} no longer exists. ` +
-        `The binary likely exited immediately. Try running '${plannerBinary} --version' to debug.`,
+        `planner '${plannerBinary}' didn't start — pane 0 in session ${plannerSession} no longer exists.\n` +
+        `  The binary likely exited immediately. Try: ${plannerBinary} --version`,
       );
     }
     if (isShell(planner0.currentCommand)) {
       throw new Error(
-        `planner '${plannerBinary}' didn't start — pane 0 is running '${planner0.currentCommand}', not '${plannerBinary}'. ` +
-        `The binary likely exited immediately and tmux fell back to your shell. Try '${plannerBinary} --version' to debug.`,
+        `planner '${plannerBinary}' didn't start — pane 0 is running '${planner0.currentCommand}', not '${plannerBinary}'.\n` +
+        `  The binary likely exited immediately and tmux fell back to your shell. Try: ${plannerBinary} --version`,
       );
     }
 
