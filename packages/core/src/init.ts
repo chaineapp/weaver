@@ -79,6 +79,19 @@ high velocity with small teams. Optimize accordingly:
 - **Build velocity > safety theater.** When the user grants \`--bypass\` or
   similar, trust them; don't litter the conversation with disclaimers.
 
+## Per-repo overrides
+
+This file is global. Any repo you work in may have its own \`AGENTS.md\`
+(read by codex) or \`CLAUDE.md\` (read by claude) at the repo root with
+project-specific rules — testing commands, deploy gates, eval requirements,
+review conventions. Those override anything here on conflict, because they
+are closer to the work.
+
+When developing Weaver itself, the weaver repo's \`AGENTS.md\` (with a
+\`CLAUDE.md\` symlink to it) adds: "run \`bun run eval\` before pushing
+dispatch-path changes" and "one-time \`bun run install-hooks\` wires the
+pre-push gate". Honor those when in that repo.
+
 ## Your standing preferences (edit me)
 
 > Replace this block with your own voice — coding style, repo conventions,
