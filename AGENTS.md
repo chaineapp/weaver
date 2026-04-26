@@ -39,6 +39,41 @@ Read this before writing any code in this repo.
 - MCP tool return values are structured (JSON), not free text. The planner is good at parsing structure.
 - Provenance on every memory file: `source_session`, `source_turn`, `updated`, `status` in frontmatter.
 
+## Architecture: TypeScript surface, portable hot-path
+
+**Default**: Weaver is TypeScript on Bun, and the user-facing surface (CLI, SDK, MCP server) stays TS forever. Iteration speed and audience alignment with the AI-SDK ecosystem outweigh raw perf for everything Weaver does today, and Weaver itself isn't on the hot path — agents and Ghostty are.
+
+**Forward-compatibility rule**: structure packages so that *if* a real bottleneck demands a Rust (or Go, or Zig) port later, it's a contained project, not a rewrite. Keep boundaries language-neutral by construction. Don't pay the cost now; preserve the option.
+
+| Package | Stays TS forever | Could port to Rust if needed |
+|---|---|---|
+| `@weaver/cli` | ✅ ergonomics live here | |
+| `@weaver/sdk` (future) | ✅ devs install via npm | |
+| `@weaver/mcp-orchestrator` | ✅ MCP TS SDK is canonical | |
+| `@weaver/core` | ✅ shared types, mostly | |
+| `@weaver/codex-adapter` | ✅ pure parser | |
+| `@weaver/tmux` | ✅ thin shell-out layer | |
+| `@weaver/daemon` (CHA-985, not built) | | ✅ if >5k events/sec sustained |
+| Live TUI dashboard (CHA-986) | | ✅ if 60fps and Ink can't keep up |
+| Future scrollback indexer | | ✅ if it ever exists |
+
+### Rules to keep the option open
+
+1. **No direct TypeScript imports across boundaries that might become process boundaries.** `@weaver/cli` may import types from `@weaver/core` (both stay TS). It must NOT import from `@weaver/daemon` — talk over a Unix socket / JSON-RPC. The boundary is the wire format, not a TS module.
+2. **Contracts are language-neutral.** When data crosses a portable boundary, define the wire shape (JSON Schema, or a TS type used *only* to validate at the edge) and serialize. The implementation could be Rust tomorrow.
+3. **Files and stdio are first-class wire formats.** Run files (JSONL), pane registry (JSON), MCP stdio protocol — all language-neutral. Don't replace them with shared in-process state.
+4. **No "just import the daemon function directly when running locally" shortcuts.** Tempting and a one-way door. The moment that ships, the daemon can never be its own process.
+
+### Three signals that *would* mean port a hot-path package
+
+Don't port on instinct. Port when one of these fires (and document the measurement in the PR):
+
+1. The daemon sustains >5k events/sec and Bun's GC shows in flame graphs.
+2. A live dashboard demands 60fps and Ink can't keep up after honest optimization.
+3. A hosted multi-tenant deployment exists and per-tenant overhead is the bottleneck.
+
+When that happens, port one package. CLI / SDK / MCP server don't change. Users don't notice.
+
 ## Non-goals (v1)
 
 - Embeddings, vector DBs, compression dialects. The research was unambiguous: regresses quality at this scale.
