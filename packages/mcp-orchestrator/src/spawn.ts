@@ -61,13 +61,26 @@ export function buildCodexCommand(
   task: string,
   opts: { binary?: string; model?: string; bypass?: boolean; extraArgs?: string } = {},
 ): string {
-  // Worker defaults to `codex exec --json`. If the user set worker.binary to
-  // something custom (aider, etc.), they own the invocation flags — we only
-  // pass the task and their extraArgs.
+  // Three known binaries get the right flags out of the box; anything else
+  // is invoked bare and the user supplies flags via extraArgs.
+  //
+  //   codex    → `codex exec --json` (non-interactive JSONL stream)
+  //   claude   → `claude -p`         (non-interactive print mode, similar idea)
+  //   <other>  → bare binary, task at the end
   const binary = opts.binary || "codex";
-  const parts: string[] = binary === "codex" ? ["codex", "exec", "--json"] : [binary];
-  if (opts.bypass && binary === "codex") parts.push("--dangerously-bypass-approvals-and-sandbox");
-  if (opts.model) parts.push("--model", shellQuote(opts.model));
+  let parts: string[];
+  if (binary === "codex") {
+    parts = ["codex", "exec", "--json"];
+    if (opts.bypass) parts.push("--dangerously-bypass-approvals-and-sandbox");
+    if (opts.model) parts.push("--model", shellQuote(opts.model));
+  } else if (binary === "claude") {
+    parts = ["claude", "-p"];
+    if (opts.bypass) parts.push("--dangerously-skip-permissions");
+    if (opts.model) parts.push("--model", shellQuote(opts.model));
+  } else {
+    parts = [binary];
+    if (opts.model) parts.push("--model", shellQuote(opts.model));
+  }
   if (opts.extraArgs) parts.push(opts.extraArgs);
   parts.push(shellQuote(task));
   return parts.join(" ");
