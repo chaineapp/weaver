@@ -172,35 +172,33 @@ Read the blocks, decide next move, call /weaver:dispatch-batch again with new ta
 
 ### What you'll see back
 
-When all dispatched workers finish, autoroute injects ONE user message containing the final answer text from each worker:
+\`/weaver:dispatch-batch\` blocks until every worker finishes, then returns one labeled block per worker:
 
 \`\`\`
-@@RESULT worker-1
+===== worker-1 =====
 <final assistant text from worker-1>
-@@END
 
-@@RESULT worker-2
+===== worker-2 =====
 <final assistant text from worker-2>
-@@END
 \`\`\`
 
-That's your next turn's input. Read all results, decide the next move:
-- More dispatches? Emit more @@DISPATCH blocks at the end of your reply.
-- Done? Reply with the final summary to the user, no @@DISPATCH blocks.
+Read the blocks, decide the next move:
+- More dispatches? Call \`/weaver:dispatch-batch\` again with new tasks.
+- Done? Reply with the final summary to the user.
 - Need clarification? Ask the user — they're watching this pane.
 
 ### Read vs edit
 
-Reading source files in THIS pane (Read tool, grep, cat, ls, git log) for context is fine — that's analysis. **Editing files / running tests of new code / making commits in this pane is forbidden.** If something needs to land on disk, dispatch a worker via @@DISPATCH. No exceptions for "this one's small."
+Reading source files in THIS pane (Read tool, grep, cat, ls, git log) for context is fine — that's analysis. **Editing files / running tests of new code / making commits in this pane is forbidden.** If something needs to land on disk, dispatch a worker. No exceptions for "this one's small."
 
-### Manual fallback (only if autoroute is broken)
+### Manual fallback (only if /weaver:dispatch-batch is unavailable)
 
-If autoroute isn't running (you can check with \`weave autoroute --help\` and \`pgrep -f autoroute\`), fall back to manual:
+If the slash command isn't installed, fall back to direct CLI calls:
 1. \`weave dispatch worker-N "<task>"\` (defaults --cwd to your current cwd)
 2. \`weave tail worker-N --wait-done\` to block until done
 3. Aggregate yourself.
 
-But in the normal case, autoroute is on — just emit @@DISPATCH blocks.
+But in the normal case, prefer \`/weaver:dispatch-batch\` — it parallelizes for you.
 
 ## The 7-step loop (per top-level user request)
 

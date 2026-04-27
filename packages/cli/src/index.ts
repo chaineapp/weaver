@@ -15,7 +15,6 @@ import { runRestartPlanner } from "./commands/restart.ts";
 import { runDispatch } from "./commands/dispatch.ts";
 import { runDispatchBatch } from "./commands/dispatch-batch.ts";
 import { runTail } from "./commands/tail.ts";
-import { runAutoroute } from "./commands/autoroute.ts";
 
 const HELP = `weave — coding agent orchestrator
 
@@ -238,27 +237,6 @@ async function main() {
         process.exit(1);
       }
       await runDispatch({ worker, task, binary: values.binary, model: values.model, bypass: values.bypass, cwd: values.cwd });
-      return;
-    }
-
-    case "autoroute": {
-      // weave autoroute --project X [--cwd PATH] [--binary X]
-      // Long-running daemon. Tails planner output, dispatches @@DISPATCH
-      // blocks, injects @@RESULT blocks back. Closes the planner↔worker loop.
-      const { values } = parseArgs({
-        args: rest,
-        options: {
-          project: { type: "string" },
-          cwd: { type: "string" },
-          binary: { type: "string" },
-        },
-        strict: true,
-      });
-      if (!values.project) {
-        console.error("usage: weave autoroute --project <id> [--cwd PATH] [--binary X]");
-        process.exit(1);
-      }
-      await runAutoroute({ project: values.project, cwd: values.cwd, binary: values.binary });
       return;
     }
 

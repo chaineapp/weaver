@@ -84,15 +84,16 @@ async function setupEvalProject(opts: { name: string; panes: number; planner: st
   await runCli(["workspace", "init", wsRoot]);
   await runCli(["new", "--name", opts.name, "--planner", opts.planner, "--no-up"], { cwd: wsRoot });
 
-  // weave up — WEAVER_NO_GHOSTTY skips the window pop, WEAVER_NO_AUTOROUTE
-  // skips the autoroute daemon (eval doesn't need it; it drives the planner
-  // via tmux send-keys directly). Uses the user's tmux server (same one
+  // weave up — WEAVER_NO_GHOSTTY skips the window pop. The eval drives the
+  // planner via tmux send-keys directly; no autoroute daemon involved (the
+  // old text-protocol parser was removed once the Claude Code plugin became
+  // the canonical orchestration path). Uses the user's tmux server (same one
   // their live session might be on) — afterEach is surgical and only kills
   // this eval's specific session + its pane records, never `weave clean`,
   // so the user's session is unaffected.
   await runCli(["up", "--project", opts.name, "--panes", String(opts.panes)], {
     cwd: wsRoot,
-    env: { WEAVER_NO_GHOSTTY: "1", WEAVER_NO_AUTOROUTE: "1" },
+    env: { WEAVER_NO_GHOSTTY: "1" },
   });
 
   const session = `weave-${opts.name}`;
