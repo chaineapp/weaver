@@ -141,6 +141,15 @@ export async function runTail(opts: TailOpts): Promise<void> {
         lastSize = size;
         stableSince = Date.now();
       }
+      if (size > startByte && Date.now() - stableSince > 500) {
+        const captured = await captureWorkerPane(pane.id);
+        const result = captured.includes("•") ? extractFromTuiCapture(captured) : "";
+        if (result) {
+          await setPaneStatus(pane.id, "completed");
+          console.log(`${slot} done: ${result}`);
+          return;
+        }
+      }
       const elapsedSinceDispatch = stableSince === 0 ? 0 : Date.now() - stableSince;
       const dispatchAgeMs = (() => {
         try {
