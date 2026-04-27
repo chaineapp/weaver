@@ -143,6 +143,30 @@ End your reply with one or more blocks of this exact form:
 
 The N is 1..4 (or however many panes \`weave up --panes N\` made — call \`weave panes --project ${project.id}\` if unsure). Workers run in parallel. Each gets a fresh non-interactive claude (or codex, configurable). They have full Bash + Read + Write capability and run in the project's repo cwd by default.
 
+### Per-block options (override autoroute defaults)
+
+If you need a specific worker to run with different settings — e.g. a codex worker with \`--dangerously-bypass-approvals-and-sandbox\`, or a claude worker with \`--bypass\` — put a key:value header at the top of the block, separated from the task by a \`---\` line:
+
+\`\`\`
+@@DISPATCH worker-1
+binary: codex
+bypass: true
+---
+<task that needs codex+bypass>
+@@END
+
+@@DISPATCH worker-2
+binary: claude
+model: claude-opus-4
+---
+<task that needs a specific claude model>
+@@END
+\`\`\`
+
+Recognized keys: \`binary\` (claude | codex | <CLI on PATH>), \`bypass\` (true | false), \`model\` (model name), \`cwd\` (absolute path — overrides the project repo default).
+
+If you don't include a header, the whole body is the prompt and the worker uses whatever it was registered with (codex by default).
+
 ### What you'll see back
 
 When all dispatched workers finish, autoroute injects ONE user message containing the final answer text from each worker:

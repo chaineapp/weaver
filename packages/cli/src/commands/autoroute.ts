@@ -52,6 +52,31 @@ import { homedir } from "node:os";
 
 const DISPATCH_RE = /@@DISPATCH\s+(worker-\d+)\s*\n([\s\S]*?)\n@@END/g;
 
+// A dispatch block body can optionally start with a `key: value` header,
+// separated from the actual task prompt by a `---` line. Supported keys:
+//   binary: claude | codex | <other CLI on PATH>
+//   bypass: true | false
+//   model:  <model name>
+//   cwd:    <absolute path>
+// Without a `---` separator, the whole body is the prompt (backwards-
+// compatible with the simple form).
+function parseBlockBody(body: string): { binary?: string; bypass?: boolean; model?: string; cwd?: string; prompt: string } {
+  const sepIdx = body.search(/^---\s*$/m);
+  if (sepIdx < 0) return { prompt: body.trim() };
+  const header = body.slice(0, sepIdx);
+  const prompt = body.slice(body.indexOf("\n", sepIdx) + 1).trim();
+  const opts: { binary?: string; bypass?: boolean; model?: string; cwd?: string; prompt: string } = { prompt };
+  for (const line of header.split("\n")) {
+    const m = line.match(/^\s*(binary|bypass|model|cwd)\s*:\s*(.+?)\s*$/);
+    if (!m) continue;
+    const key = m[1] as "binary" | "bypass" | "model" | "cwd";
+    const val = m[2]!;
+    if (key === "bypass") opts.bypass = /^(true|yes|on|1)$/i.test(val);
+    else opts[key] = val;
+  }
+  return opts;
+}
+
 // Claude Code encodes the planner's cwd into a flat dirname under
 // ~/.claude/projects/. Rule (verified empirically): every non-alphanumeric
 // char becomes `-`. So /Users/pom/Code/.weaver/projects/weave becomes
@@ -165,11 +190,20 @@ export async function runAutoroute(opts: AutorouteOpts): Promise<void> {
       } catch { /* malformed line — skip */ }
     }
     const clean = assistantText.join("\n\n");
-    const blocks = [...clean.matchAll(DISPATCH_RE)].map((m) => ({
-      worker: m[1]!,
-      prompt: m[2]!.trim(),
-      key: hash(`${m[1]}|${m[2]}`),
-    }));
+    const blocks = [...clean.matchAll(DISPATCH_RE)].map((m) => {
+      const parsed = parseBlockBody(m[2]!);
+      return {
+        worker: m[1]!,
+        prompt: parsed.prompt,
+        binary: parsed.binary,
+        bypass: parsed.bypass,
+        model: parsed.model,
+        cwd: parsed.cwd,
+        // Hash includes the FULL body (with header) so two dispatches that
+        // differ only in options aren't deduped.
+        key: hash(`${m[1]}|${m[2]}`),
+      };
+    });
 
     // First time we see this log file (startup or session switch), seed
     // `processed` with every block already in it. We assume any blocks
@@ -192,17 +226,35 @@ export async function runAutoroute(opts: AutorouteOpts): Promise<void> {
     for (const b of fresh) processed.add(b.key);
 
     console.log(`${logPrefix} dispatching ${fresh.length} block(s)`);
-    // Dispatch all in parallel.
+    // Dispatch all in parallel. Per-block options (binary/bypass/model/cwd)
+    // override the autoroute-wide defaults, letting the planner emit:
+    //   @@DISPATCH worker-1
+    //   binary: codex
+    //   bypass: true
+    //   ---
+    //   <task>
+    //   @@END
+    // ...for fine-grained control (codex with permissions for some, claude
+    // for others, etc.).
     await Promise.all(
       fresh.map(async (b) => {
         try {
           await runDispatch({
             worker: b.worker,
             task: b.prompt,
-            binary,
-            cwd: workerCwd,
+            // If the block didn't specify a binary, leave undefined so
+            // runDispatch falls back to pane.binary (the codex/claude the
+            // worker was registered with) instead of forcing claude. This
+            // was the old bug: autoroute always overrode pane.binary, so
+            // even though up.ts registers workers as binary=codex by
+            // default, autoroute ran them as claude.
+            binary: b.binary ?? opts.binary,
+            bypass: b.bypass,
+            model: b.model,
+            cwd: b.cwd ?? workerCwd,
           });
-          console.log(`${logPrefix} → ${b.worker}: ${b.prompt.slice(0, 80)}…`);
+          const tag = [b.binary, b.bypass ? "bypass" : null].filter(Boolean).join(",");
+          console.log(`${logPrefix} → ${b.worker}${tag ? ` [${tag}]` : ""}: ${b.prompt.slice(0, 80)}…`);
         } catch (err) {
           console.error(`${logPrefix} dispatch ${b.worker} failed: ${(err as Error).message}`);
         }
