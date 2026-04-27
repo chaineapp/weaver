@@ -120,19 +120,40 @@ export async function runTail(opts: TailOpts): Promise<void> {
       }
     }
     // Pane-stability path for interactive TUI workers.
+    //
+    // Trigger conditions (all must hold):
+    //   1. >=10s elapsed since the dispatch's lastReviewedByte (gives codex/
+    //      claude time to start up — MCP server connect, render the TUI box,
+    //      etc. takes 1-3s typically).
+    //   2. Run file grew at least 4KB beyond the dispatch starting point —
+    //      that's roughly enough for codex to render its header box AND
+    //      produce some response text. Below this, we likely caught codex
+    //      mid-warmup.
+    //   3. 8s of no run-file growth — the TUI is idle (between turns or
+    //      done). Codex's render cycle finishes within a couple seconds of
+    //      the assistant message; 8s catches even slow models.
     if (opts.waitDone) {
       const f = Bun.file(file);
       const size = (await f.exists()) ? f.size : 0;
+      const startByte = opts.since ?? pane.lastReviewedByte ?? 0;
+      const grown = size - startByte;
       if (size !== lastSize) {
         lastSize = size;
         stableSince = Date.now();
       }
-      // ~5s of no run-file growth → likely TUI is idle. Verify by checking
-      // tmux pane current_command — if it's a shell, the agent has exited.
-      // If still claude/codex, the agent is between turns waiting for input
-      // (ALSO a valid completion state for our dispatch-once flow).
-      if (Date.now() - stableSince > 5000 && size > (opts.since ?? pane.lastReviewedByte ?? 0)) {
-        const captured = await captureWorkerSinceDispatch(pane.id, opts.since ?? pane.lastReviewedByte ?? 0, lastSize - (opts.since ?? pane.lastReviewedByte ?? 0));
+      const elapsedSinceDispatch = stableSince === 0 ? 0 : Date.now() - stableSince;
+      const dispatchAgeMs = (() => {
+        try {
+          const updated = pane.updatedAt ? new Date(pane.updatedAt).getTime() : 0;
+          return Date.now() - updated;
+        } catch { return 0; }
+      })();
+      if (
+        dispatchAgeMs > 10_000 &&
+        grown > 4096 &&
+        elapsedSinceDispatch > 8000
+      ) {
+        const captured = await captureWorkerPane(pane.id);
         const result = extractFromTuiCapture(captured);
         await setPaneStatus(pane.id, "completed");
         console.log(`${slot} done: ${result || "(no result captured)"}`);
@@ -147,7 +168,7 @@ export async function runTail(opts: TailOpts): Promise<void> {
 // workers where the run file is full of ANSI escapes and we want the user-
 // visible output. Returns the last ~600 lines of pane scrollback (enough for
 // any single dispatch).
-async function captureWorkerSinceDispatch(paneId: string, _sinceByte: number, _lengthBytes: number): Promise<string> {
+async function captureWorkerPane(paneId: string): Promise<string> {
   const proc = Bun.spawn(["tmux", "capture-pane", "-p", "-t", paneId, "-S", "-600"], {
     stdout: "pipe",
     stderr: "ignore",
@@ -157,25 +178,61 @@ async function captureWorkerSinceDispatch(paneId: string, _sinceByte: number, _l
   return out;
 }
 
-// Extract the most recent assistant text from a captured TUI pane. Codex's
-// TUI uses panel formatting; we look for the chunk between the last user
-// prompt indicator and the next idle prompt. As a safety net, return the
-// full captured text if no marker is found — the planner can read it.
+// Extract the assistant's response from a captured codex/claude TUI pane.
+//
+// codex TUI renders its session like this (after ANSI strip):
+//
+//   ╭──────╮
+//   │ ...  │     ← header box
+//   ╰──────╯
+//   Tip: ...     ← startup messages
+//
+//   › <user prompt 1>     ← user input echo (codex marker: "›")
+//   <thinking output>     ← codex's reasoning/streaming
+//   • <assistant reply>   ← final assistant text (codex marker: "•")
+//
+//   › Implement {feature} ← PLACEHOLDER for the next prompt (when idle)
+//   <empty>
+//   gpt-5.4 xhigh fast · ~/Code/weaver  ← footer
+//
+// We extract by finding the LAST `•` (response marker), since `›` lines
+// can be either a real user prompt OR codex's placeholder when waiting.
+// The response always lives between a real user prompt and the placeholder.
 function extractFromTuiCapture(captured: string): string {
-  // Strip ANSI escapes.
-  const clean = captured.replace(/\x1b\[[0-9;?]*[A-Za-z]|\x1b\][^\x07]*\x07|\r/g, "");
+  const clean = captured
+    .replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "")
+    .replace(/\x1b\][^\x07]*\x07/g, "")
+    .replace(/\r/g, "");
   const lines = clean.split("\n");
-  // Find the last line that looks like an idle shell prompt (after codex/claude exited).
-  // codex inline-mode tends to print a "thinking" / panels and then return to the user's
-  // shell prompt (e.g. `➜  weave`). Take everything BEFORE that final prompt.
-  let endIdx = lines.length;
+
+  // Find the last `•` response marker.
+  let lastResponseIdx = -1;
   for (let i = lines.length - 1; i >= 0; i--) {
-    const l = lines[i]!.trimEnd();
-    if (/^(➜|\$|>)\s/.test(l)) { endIdx = i; break; }
+    const l = lines[i]!.trimStart();
+    if (/^•\s/.test(l)) { lastResponseIdx = i; break; }
   }
-  // Find a reasonable start — last 60 lines is plenty for a turn.
-  const start = Math.max(0, endIdx - 60);
-  return lines.slice(start, endIdx).join("\n").trim();
+  if (lastResponseIdx < 0) {
+    // Codex didn't produce a `•` marker. Fall back to last 40 non-empty lines.
+    return lines.filter((l) => l.trim()).slice(-40).join("\n").trim();
+  }
+
+  // Capture from the response marker forward, stopping at:
+  //   - The next `›` (placeholder for next user input)
+  //   - Codex's gpt-X.Y footer
+  //   - "Use /skills" tip line
+  // The response text might span multiple lines; grab them all.
+  const out: string[] = [];
+  for (let i = lastResponseIdx; i < lines.length; i++) {
+    const l = lines[i]!;
+    const trimmed = l.trimStart();
+    if (i > lastResponseIdx && /^›\s/.test(trimmed)) break;
+    if (/Use \/skills/.test(trimmed)) break;
+    if (/^\s*gpt-[\d.]+ \w+ \w+ · /.test(trimmed)) break;
+    out.push(l);
+  }
+  // Strip the leading `• ` from the first line so the result is clean text.
+  if (out.length > 0) out[0] = out[0]!.replace(/^\s*•\s+/, "");
+  return out.join("\n").trim();
 }
 
 function isTerminal(e: any): boolean {

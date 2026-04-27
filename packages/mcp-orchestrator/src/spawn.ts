@@ -84,10 +84,13 @@ export function buildCodexCommand(
   let parts: string[];
   if (binary === "codex") {
     if (interactive) {
-      // codex auto-detects the cwd as the project; --skip-git-repo-check
-      // covers the case where cwd isn't a git repo (Weaver project dirs
-      // under .weaver/projects/<id>/).
-      parts = ["codex", "--no-alt-screen", "--skip-git-repo-check"];
+      // Interactive codex doesn't accept --skip-git-repo-check (it's an
+      // `exec` subcommand-only flag). When cwd is a git repo (the normal
+      // Weaver path — `weave dispatch --cwd <repo>` defaults to the
+      // calling shell's cwd), codex's trust check passes silently. If
+      // someone dispatches into a non-git dir, codex will prompt "trust
+      // this folder?" in the TUI and the user can answer.
+      parts = ["codex", "--no-alt-screen"];
       if (opts.bypass) {
         parts.push("--dangerously-bypass-approvals-and-sandbox");
       } else {

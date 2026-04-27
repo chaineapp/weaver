@@ -46,15 +46,15 @@ describe("buildCodexCommand", () => {
   // --dangerously-bypass-approvals-and-sandbox = full bypass (when bypass=true).
   // --skip-git-repo-check is always on because Weaver dispatches into
   // project dirs that often aren't git repos.
-  test("interactive default: --no-alt-screen --skip-git-repo-check --full-auto", async () => {
+  test("interactive default: --no-alt-screen --full-auto", async () => {
     const { buildCodexCommand } = await import("../../mcp-orchestrator/src/spawn.ts");
-    expect(buildCodexCommand("review x")).toBe("codex --no-alt-screen --skip-git-repo-check --full-auto 'review x'");
+    expect(buildCodexCommand("review x")).toBe("codex --no-alt-screen --full-auto 'review x'");
   });
 
   test("interactive + bypass swaps --full-auto for --dangerously-bypass-approvals-and-sandbox", async () => {
     const { buildCodexCommand } = await import("../../mcp-orchestrator/src/spawn.ts");
     expect(buildCodexCommand("x", { bypass: true })).toBe(
-      "codex --no-alt-screen --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox 'x'",
+      "codex --no-alt-screen --dangerously-bypass-approvals-and-sandbox 'x'",
     );
   });
 
@@ -62,7 +62,7 @@ describe("buildCodexCommand", () => {
     const { buildCodexCommand } = await import("../../mcp-orchestrator/src/spawn.ts");
     expect(
       buildCodexCommand("x", { bypass: true, model: "gpt-5-codex-high" }),
-    ).toBe("codex --no-alt-screen --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox --model 'gpt-5-codex-high' 'x'");
+    ).toBe("codex --no-alt-screen --dangerously-bypass-approvals-and-sandbox --model 'gpt-5-codex-high' 'x'");
   });
 
   test("non-interactive mode (interactive: false) keeps the codex exec --json path", async () => {
