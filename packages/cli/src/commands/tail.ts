@@ -218,11 +218,25 @@ function extractFromTuiCapture(captured: string): string {
   let lastResponseIdx = -1;
   for (let i = lines.length - 1; i >= 0; i--) {
     const l = lines[i]!.trimStart();
-    if (/^•\s/.test(l)) { lastResponseIdx = i; break; }
+    if (!/^•\s/.test(l)) continue;
+    // Skip codex status `•` lines that aren't real assistant responses:
+    //   • Booting MCP server: codex_apps (0s • esc to interrupt)
+    //   • Starting MCP servers (1/2): linear (3s • esc to interrupt)
+    //   • Connecting to <whatever>...
+    //   • Working on <stuff> (esc to interrupt)
+    // Real responses don't carry the "esc to interrupt" suffix and don't
+    // start with these connect/boot/work verbs.
+    if (/^•\s+(Booting|Starting|Connecting|Loading|Authenticating|Working|Thinking|Reasoning)\b/i.test(l)) continue;
+    if (/esc to interrupt/i.test(l)) continue;
+    lastResponseIdx = i;
+    break;
   }
   if (lastResponseIdx < 0) {
-    // Codex didn't produce a `•` marker. Fall back to last 40 non-empty lines.
-    return lines.filter((l) => l.trim()).slice(-40).join("\n").trim();
+    // No real `•` response yet — return empty so the wait-done loop keeps
+    // polling instead of latching onto a status line. The caller's fallback
+    // (8s pane stability with conservative thresholds) will still trip if
+    // codex genuinely never produces a response.
+    return "";
   }
 
   // Capture from the response marker forward, stopping at:
