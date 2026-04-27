@@ -39,15 +39,19 @@ describe("buildPlannerCommand", () => {
 });
 
 describe("buildCodexCommand", () => {
-  test("plain task", async () => {
+  // codex always gets --skip-git-repo-check because Weaver dispatches
+  // workers from a trusted parent into project folders that often aren't
+  // git repos (e.g. .weaver/projects/<id>/). Without it, codex refuses to
+  // start with "Not inside a trusted directory".
+  test("plain task includes --skip-git-repo-check", async () => {
     const { buildCodexCommand } = await import("../../mcp-orchestrator/src/spawn.ts");
-    expect(buildCodexCommand("review x")).toBe("codex exec --json 'review x'");
+    expect(buildCodexCommand("review x")).toBe("codex exec --json --skip-git-repo-check 'review x'");
   });
 
   test("bypass adds --dangerously-bypass-approvals-and-sandbox", async () => {
     const { buildCodexCommand } = await import("../../mcp-orchestrator/src/spawn.ts");
     expect(buildCodexCommand("x", { bypass: true })).toBe(
-      "codex exec --json --dangerously-bypass-approvals-and-sandbox 'x'",
+      "codex exec --json --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox 'x'",
     );
   });
 
@@ -55,7 +59,7 @@ describe("buildCodexCommand", () => {
     const { buildCodexCommand } = await import("../../mcp-orchestrator/src/spawn.ts");
     expect(
       buildCodexCommand("x", { bypass: true, model: "gpt-5-codex-high" }),
-    ).toBe("codex exec --json --dangerously-bypass-approvals-and-sandbox --model 'gpt-5-codex-high' 'x'");
+    ).toBe("codex exec --json --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox --model 'gpt-5-codex-high' 'x'");
   });
 });
 

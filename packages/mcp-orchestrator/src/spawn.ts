@@ -70,7 +70,15 @@ export function buildCodexCommand(
   const binary = opts.binary || "codex";
   let parts: string[];
   if (binary === "codex") {
-    parts = ["codex", "exec", "--json"];
+    // --skip-git-repo-check: codex refuses to run in a directory that isn't
+    // an explicitly-trusted git repo. Inside Weaver, workers are dispatched
+    // by a trusted parent (the planner), and the cwd may be a project folder
+    // under .weaver/projects/<id>/ that isn't a git repo at all. Always
+    // pass the flag so codex doesn't fail before it starts. Verified
+    // necessary: without it, dispatched codex workers exited with
+    // "Not inside a trusted directory and --skip-git-repo-check was not
+    //  specified".
+    parts = ["codex", "exec", "--json", "--skip-git-repo-check"];
     if (opts.bypass) parts.push("--dangerously-bypass-approvals-and-sandbox");
     if (opts.model) parts.push("--model", shellQuote(opts.model));
   } else if (binary === "claude") {
