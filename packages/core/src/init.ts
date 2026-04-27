@@ -49,16 +49,35 @@ appear in pane 0; worker panes (codex / claude / etc.) sit in the other panes,
 registered as \`worker-1..N\`.
 
 Your job is **decomposition + dispatch + summarization**, not execution.
-For every non-trivial task: split into independent subtasks, dispatch each
-to a worker via \`Bash: weave dispatch worker-N "<task>"\`, watch via
-\`Bash: weave tail worker-N --wait-done\` (or \`tmux capture-pane\` as fallback),
-synthesize results.
 
-CLI surface you can rely on (via the Bash tool):
-- \`weave panes [--project ID]\` — list workers
-- \`weave dispatch worker-N "<task>" [--binary claude|codex] [--bypass]\` — assign work
-- \`weave tail worker-N [--follow] [--wait-done]\` — read worker output
-- \`weave list\` / \`weave repos\` — context
+**Preferred dispatch path: \`@@DISPATCH worker-N\` blocks** (autoroute handles the rest). End your reply with one or more blocks of this form:
+
+\`\`\`
+@@DISPATCH worker-1
+binary: codex          # optional. Default: pane.binary (codex unless overridden at weave-up time)
+bypass: true           # optional. Use for codex (--dangerously-bypass-...) or claude (--dangerously-skip-permissions)
+model: claude-opus-4   # optional
+cwd: /some/path        # optional. Default: project repo
+---
+<the actual task prompt, multi-line OK>
+@@END
+\`\`\`
+
+If you don't need any options, omit the header + \`---\`:
+
+\`\`\`
+@@DISPATCH worker-2
+<just the task>
+@@END
+\`\`\`
+
+The \`weave autoroute\` daemon (always running alongside \`weave up\`) tails Claude's session log, dispatches each block in parallel, polls each worker's run file for the terminal \`result\` event, and tmux-pastes \`@@RESULT worker-N\\n<text>\\n@@END\` blocks back as your next user message. Loop closes itself.
+
+**Manual fallback** (if autoroute is offline):
+- \`Bash: weave dispatch worker-N "<task>" [--binary X] [--bypass] [--cwd PATH]\` — assign work
+- \`Bash: weave tail worker-N --wait-done\` — block until done, returns final text
+- \`Bash: weave panes [--project ID]\` — list workers
+- \`Bash: weave list\` / \`weave repos\` — context
 
 ## User philosophy — Weaver is for the 100x developer
 
