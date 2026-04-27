@@ -39,27 +39,35 @@ describe("buildPlannerCommand", () => {
 });
 
 describe("buildCodexCommand", () => {
-  // codex always gets --skip-git-repo-check because Weaver dispatches
-  // workers from a trusted parent into project folders that often aren't
-  // git repos (e.g. .weaver/projects/<id>/). Without it, codex refuses to
-  // start with "Not inside a trusted directory".
-  test("plain task includes --skip-git-repo-check", async () => {
+  // Default mode is interactive — workers run the real codex/claude TUI
+  // in their tmux pane so the user can watch thoughts/actions live.
+  // --no-alt-screen keeps everything inline with tmux scrollback.
+  // --full-auto = sandboxed auto-approve (safe default).
+  // --dangerously-bypass-approvals-and-sandbox = full bypass (when bypass=true).
+  // --skip-git-repo-check is always on because Weaver dispatches into
+  // project dirs that often aren't git repos.
+  test("interactive default: --no-alt-screen --skip-git-repo-check --full-auto", async () => {
     const { buildCodexCommand } = await import("../../mcp-orchestrator/src/spawn.ts");
-    expect(buildCodexCommand("review x")).toBe("codex exec --json --skip-git-repo-check 'review x'");
+    expect(buildCodexCommand("review x")).toBe("codex --no-alt-screen --skip-git-repo-check --full-auto 'review x'");
   });
 
-  test("bypass adds --dangerously-bypass-approvals-and-sandbox", async () => {
+  test("interactive + bypass swaps --full-auto for --dangerously-bypass-approvals-and-sandbox", async () => {
     const { buildCodexCommand } = await import("../../mcp-orchestrator/src/spawn.ts");
     expect(buildCodexCommand("x", { bypass: true })).toBe(
-      "codex exec --json --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox 'x'",
+      "codex --no-alt-screen --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox 'x'",
     );
   });
 
-  test("model + bypass combined", async () => {
+  test("interactive + bypass + model", async () => {
     const { buildCodexCommand } = await import("../../mcp-orchestrator/src/spawn.ts");
     expect(
       buildCodexCommand("x", { bypass: true, model: "gpt-5-codex-high" }),
-    ).toBe("codex exec --json --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox --model 'gpt-5-codex-high' 'x'");
+    ).toBe("codex --no-alt-screen --skip-git-repo-check --dangerously-bypass-approvals-and-sandbox --model 'gpt-5-codex-high' 'x'");
+  });
+
+  test("non-interactive mode (interactive: false) keeps the codex exec --json path", async () => {
+    const { buildCodexCommand } = await import("../../mcp-orchestrator/src/spawn.ts");
+    expect(buildCodexCommand("x", { interactive: false })).toBe("codex exec --json --skip-git-repo-check 'x'");
   });
 });
 

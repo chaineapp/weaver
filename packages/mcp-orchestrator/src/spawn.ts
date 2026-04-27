@@ -59,37 +59,53 @@ export async function spawnWorker(opts: SpawnOptions): Promise<PaneRecord> {
 
 export function buildCodexCommand(
   task: string,
-  opts: { binary?: string; model?: string; bypass?: boolean; extraArgs?: string } = {},
+  opts: { binary?: string; model?: string; bypass?: boolean; extraArgs?: string; interactive?: boolean } = {},
 ): string {
   // Three known binaries get the right flags out of the box; anything else
   // is invoked bare and the user supplies flags via extraArgs.
   //
-  //   codex    → `codex exec --json` (non-interactive JSONL stream)
-  //   claude   → `claude -p`         (non-interactive print mode, similar idea)
-  //   <other>  → bare binary, task at the end
+  // Interactive mode (default) launches the binary's real TUI in the worker
+  // pane so the user can watch thoughts, tool calls, and edits the way they
+  // would running it directly:
+  //
+  //   codex    → `codex --no-alt-screen [--full-auto | --dangerously-bypass-...] <task>`
+  //              --no-alt-screen keeps everything inline with tmux scrollback.
+  //              --full-auto = sandboxed auto-approve (default safe path).
+  //              --dangerously-bypass-... = full unsandboxed bypass (when bypass=true).
+  //   claude   → `claude --dangerously-skip-permissions <task>` (interactive TUI).
+  //
+  // Non-interactive mode (interactive=false) keeps the old structured-output
+  // path for tooling that needs JSONL (e.g. eval framework):
+  //
+  //   codex    → `codex exec --json --skip-git-repo-check ...`
+  //   claude   → `claude -p --output-format stream-json --verbose ...`
   const binary = opts.binary || "codex";
+  const interactive = opts.interactive ?? true;
   let parts: string[];
   if (binary === "codex") {
-    // --skip-git-repo-check: codex refuses to run in a directory that isn't
-    // an explicitly-trusted git repo. Inside Weaver, workers are dispatched
-    // by a trusted parent (the planner), and the cwd may be a project folder
-    // under .weaver/projects/<id>/ that isn't a git repo at all. Always
-    // pass the flag so codex doesn't fail before it starts. Verified
-    // necessary: without it, dispatched codex workers exited with
-    // "Not inside a trusted directory and --skip-git-repo-check was not
-    //  specified".
-    parts = ["codex", "exec", "--json", "--skip-git-repo-check"];
-    if (opts.bypass) parts.push("--dangerously-bypass-approvals-and-sandbox");
+    if (interactive) {
+      // codex auto-detects the cwd as the project; --skip-git-repo-check
+      // covers the case where cwd isn't a git repo (Weaver project dirs
+      // under .weaver/projects/<id>/).
+      parts = ["codex", "--no-alt-screen", "--skip-git-repo-check"];
+      if (opts.bypass) {
+        parts.push("--dangerously-bypass-approvals-and-sandbox");
+      } else {
+        parts.push("--full-auto");
+      }
+    } else {
+      parts = ["codex", "exec", "--json", "--skip-git-repo-check"];
+      if (opts.bypass) parts.push("--dangerously-bypass-approvals-and-sandbox");
+    }
     if (opts.model) parts.push("--model", shellQuote(opts.model));
   } else if (binary === "claude") {
-    // claude -p with stream-json output emits proper JSONL we can parse for
-    // turn-complete events. Without --output-format stream-json, claude prints
-    // plain rendered text and `weave tail --wait-done` has nothing to grab on
-    // to. claude requires --verbose when --output-format=stream-json (per
-    // claude's own validation). The pipe-paned terminal still captures all of
-    // it; tail.ts knows both shapes.
-    parts = ["claude", "-p", "--output-format", "stream-json", "--verbose"];
-    if (opts.bypass) parts.push("--dangerously-skip-permissions");
+    if (interactive) {
+      parts = ["claude"];
+      if (opts.bypass) parts.push("--dangerously-skip-permissions");
+    } else {
+      parts = ["claude", "-p", "--output-format", "stream-json", "--verbose"];
+      if (opts.bypass) parts.push("--dangerously-skip-permissions");
+    }
     if (opts.model) parts.push("--model", shellQuote(opts.model));
   } else {
     parts = [binary];

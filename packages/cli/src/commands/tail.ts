@@ -87,7 +87,24 @@ export async function runTail(opts: TailOpts): Promise<void> {
     return;
   }
 
-  // Polling loop. 200ms is fine for one-shot codex tasks; refine later.
+  // Polling loop. Two strategies:
+  //
+  //   (A) Structured-event detection — for non-interactive workers that emit
+  //       codex `--json` or claude `--output-format stream-json`. We see
+  //       proper terminal events (turn.completed / result.success) in the
+  //       run file. This is the original path.
+  //
+  //   (B) Pane-stability detection — for interactive workers (codex TUI,
+  //       claude TUI). The run file captures rendered terminal output (full
+  //       of ANSI escapes, no clean event boundaries). Instead we check
+  //       whether the worker's tmux pane has been quiet for ~5s AND its
+  //       current command is back to a shell (codex/claude has exited or
+  //       paused) OR the rendered last line ends in an idle prompt marker.
+  //       Result is then the captured pane content since dispatch.
+  //
+  // Both run in parallel. First one to fire wins.
+  let stableSince = Date.now();
+  let lastSize = 0;
   while (true) {
     const { newOffset, events } = await readNew();
     offset = newOffset;
@@ -95,17 +112,70 @@ export async function runTail(opts: TailOpts): Promise<void> {
       printEvent(slot, e);
       const msg = extractAssistantMessage(e);
       if (msg) finalMessage = msg;
-      if (isTerminal(e)) {
-        if (opts.waitDone) {
-          await setPaneStatus(pane.id, "completed");
-          if (finalMessage) console.log(`${slot} done: ${finalMessage}`);
-          else console.log(`${slot} done`);
-          return;
-        }
+      if (isTerminal(e) && opts.waitDone) {
+        await setPaneStatus(pane.id, "completed");
+        if (finalMessage) console.log(`${slot} done: ${finalMessage}`);
+        else console.log(`${slot} done`);
+        return;
       }
     }
-    await new Promise((r) => setTimeout(r, 200));
+    // Pane-stability path for interactive TUI workers.
+    if (opts.waitDone) {
+      const f = Bun.file(file);
+      const size = (await f.exists()) ? f.size : 0;
+      if (size !== lastSize) {
+        lastSize = size;
+        stableSince = Date.now();
+      }
+      // ~5s of no run-file growth → likely TUI is idle. Verify by checking
+      // tmux pane current_command — if it's a shell, the agent has exited.
+      // If still claude/codex, the agent is between turns waiting for input
+      // (ALSO a valid completion state for our dispatch-once flow).
+      if (Date.now() - stableSince > 5000 && size > (opts.since ?? pane.lastReviewedByte ?? 0)) {
+        const captured = await captureWorkerSinceDispatch(pane.id, opts.since ?? pane.lastReviewedByte ?? 0, lastSize - (opts.since ?? pane.lastReviewedByte ?? 0));
+        const result = extractFromTuiCapture(captured);
+        await setPaneStatus(pane.id, "completed");
+        console.log(`${slot} done: ${result || "(no result captured)"}`);
+        return;
+      }
+    }
+    await new Promise((r) => setTimeout(r, 250));
   }
+}
+
+// Capture the worker pane's content (rendered text). Used for interactive TUI
+// workers where the run file is full of ANSI escapes and we want the user-
+// visible output. Returns the last ~600 lines of pane scrollback (enough for
+// any single dispatch).
+async function captureWorkerSinceDispatch(paneId: string, _sinceByte: number, _lengthBytes: number): Promise<string> {
+  const proc = Bun.spawn(["tmux", "capture-pane", "-p", "-t", paneId, "-S", "-600"], {
+    stdout: "pipe",
+    stderr: "ignore",
+  });
+  const out = await new Response(proc.stdout).text();
+  await proc.exited;
+  return out;
+}
+
+// Extract the most recent assistant text from a captured TUI pane. Codex's
+// TUI uses panel formatting; we look for the chunk between the last user
+// prompt indicator and the next idle prompt. As a safety net, return the
+// full captured text if no marker is found — the planner can read it.
+function extractFromTuiCapture(captured: string): string {
+  // Strip ANSI escapes.
+  const clean = captured.replace(/\x1b\[[0-9;?]*[A-Za-z]|\x1b\][^\x07]*\x07|\r/g, "");
+  const lines = clean.split("\n");
+  // Find the last line that looks like an idle shell prompt (after codex/claude exited).
+  // codex inline-mode tends to print a "thinking" / panels and then return to the user's
+  // shell prompt (e.g. `➜  weave`). Take everything BEFORE that final prompt.
+  let endIdx = lines.length;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const l = lines[i]!.trimEnd();
+    if (/^(➜|\$|>)\s/.test(l)) { endIdx = i; break; }
+  }
+  // Find a reasonable start — last 60 lines is plenty for a turn.
+  const start = Math.max(0, endIdx - 60);
+  return lines.slice(start, endIdx).join("\n").trim();
 }
 
 function isTerminal(e: any): boolean {
