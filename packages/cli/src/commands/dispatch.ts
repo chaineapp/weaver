@@ -66,7 +66,16 @@ export async function runDispatch(opts: DispatchOpts): Promise<void> {
   // then the one stored on the pane at registration, then config, then codex.
   const cfg = await readConfig();
   const binary = opts.binary ?? pane.binary ?? cfg?.worker?.binary ?? "codex";
-  const cmd = buildCodexCommand(opts.task, {
+  // Collapse newlines in the task to spaces before quoting. tmux send-keys
+  // treats every literal \n as an Enter keystroke, so a multi-line task
+  // text becomes a multi-line shell input where the first \n submits the
+  // (still-unclosed-quote) command — zsh drops to its `quote>` continuation
+  // prompt and the dispatch hangs forever. Collapsing to spaces preserves
+  // the prompt's meaning to codex while keeping it as a single shell line.
+  // Verified live: workers were stuck at zsh's `quote>` prompt because the
+  // planner's JSON tasks had \n separators between numbered steps.
+  const taskOneLine = opts.task.replace(/\r?\n/g, " ");
+  const cmd = buildCodexCommand(taskOneLine, {
     binary,
     model: opts.model ?? cfg?.worker?.model,
     bypass: opts.bypass ?? cfg?.worker?.bypass ?? false,
