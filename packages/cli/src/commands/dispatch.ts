@@ -73,6 +73,27 @@ export async function runDispatch(opts: DispatchOpts): Promise<void> {
     extraArgs: cfg?.worker?.extraArgs,
   });
 
+  // CRITICAL: kill any running interactive codex/claude in the pane BEFORE
+  // dispatching. Workers stay alive between dispatches in interactive mode
+  // (codex --no-alt-screen returns to its idle prompt after each turn). If
+  // we just sendKeys the new `cd ... && codex ...` command, codex interprets
+  // the entire string as USER INPUT to its existing session — not as shell
+  // commands — and replies "I can't change your shell directory from here"
+  // instead of running the new task. Symptom seen in dogfood: dispatch text
+  // appeared in codex's input field, codex commented on it, never ran the
+  // actual task.
+  //
+  // Fix: send Ctrl-C twice (interrupts whatever codex is doing then exits
+  // its prompt; if shell, both Ctrl-Cs are no-ops). Then a small wait so the
+  // shell prompt re-renders before we type cd + the new codex command.
+  // Trade-off: loses multi-turn continuity (each dispatch is a fresh codex
+  // session). Multi-turn can come back as an opt-in `--continue` flag later
+  // — predictability matters more right now.
+  await Bun.spawn(["tmux", "send-keys", "-t", pane.id, "C-c"], { stdout: "ignore", stderr: "ignore" }).exited;
+  await new Promise((r) => setTimeout(r, 100));
+  await Bun.spawn(["tmux", "send-keys", "-t", pane.id, "C-c"], { stdout: "ignore", stderr: "ignore" }).exited;
+  await new Promise((r) => setTimeout(r, 250));
+
   // Default --cwd to the caller's process.cwd() so shell intuition holds:
   // `cd /some/repo && weave dispatch worker-1 "..."` runs the worker IN
   // /some/repo, just like any other shell command would. claude treats its
