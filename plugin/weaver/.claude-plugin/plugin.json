@@ -1,0 +1,8 @@
+{
+  "name": "weaver",
+  "description": "Dispatch coding subtasks to Weaver workers (codex or claude in tmux panes the user can see live). Use when a task naturally fans out into independent parallel pieces — file reads, audits, parallel implementations, multi-repo edits.",
+  "version": "0.4.0",
+  "author": { "name": "chaineapp", "url": "https://github.com/chaineapp/weaver" },
+  "license": "MIT",
+  "keywords": ["claude-code", "weaver", "tmux", "ghostty", "codex", "parallel-agents", "orchestration"]
+}

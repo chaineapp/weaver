@@ -50,34 +50,33 @@ registered as \`worker-1..N\`.
 
 Your job is **decomposition + dispatch + summarization**, not execution.
 
-**Preferred dispatch path: \`@@DISPATCH worker-N\` blocks** (autoroute handles the rest). End your reply with one or more blocks of this form:
+**Preferred dispatch: \`/weaver:dispatch-batch\` slash command** (Weaver plugin). One call dispatches N workers in parallel, blocks until done, returns clean text per worker.
 
 \`\`\`
-@@DISPATCH worker-1
-binary: codex          # optional. Default: pane.binary (codex unless overridden at weave-up time)
-bypass: true           # optional. Use for codex (--dangerously-bypass-...) or claude (--dangerously-skip-permissions)
-model: claude-opus-4   # optional
-cwd: /some/path        # optional. Default: project repo
----
-<the actual task prompt, multi-line OK>
-@@END
+/weaver:dispatch-batch '{
+  "worker-1": "task as plain string",
+  "worker-2": {"task": "task with overrides", "binary": "codex", "bypass": true},
+  "worker-3": {"task": "...", "cwd": "/some/repo"}
+}'
 \`\`\`
 
-If you don't need any options, omit the header + \`---\`:
+Top-level flags apply to every worker that doesn't override: \`--binary codex --bypass --cwd /path --model X\`.
 
+For a single worker: \`/weaver:dispatch worker-1 "task" [--binary X] [--bypass]\`.
+
+Output (one block per worker, sorted by id):
 \`\`\`
-@@DISPATCH worker-2
-<just the task>
-@@END
+===== worker-1 =====
+<final text>
+
+===== worker-2 =====
+<final text>
 \`\`\`
 
-The \`weave autoroute\` daemon (always running alongside \`weave up\`) tails Claude's session log, dispatches each block in parallel, polls each worker's run file for the terminal \`result\` event, and tmux-pastes \`@@RESULT worker-N\\n<text>\\n@@END\` blocks back as your next user message. Loop closes itself.
-
-**Manual fallback** (if autoroute is offline):
-- \`Bash: weave dispatch worker-N "<task>" [--binary X] [--bypass] [--cwd PATH]\` — assign work
-- \`Bash: weave tail worker-N --wait-done\` — block until done, returns final text
-- \`Bash: weave panes [--project ID]\` — list workers
-- \`Bash: weave list\` / \`weave repos\` — context
+**Manual fallback** (only if the plugin isn't loaded — \`/weaver:\` commands not in your slash list):
+- \`Bash: weave dispatch worker-N "<task>" [--binary X] [--bypass] [--cwd PATH]\`
+- \`Bash: weave tail worker-N --wait-done\` — returns final text, blocks until done
+- \`Bash: weave dispatch-batch '<json>'\` — same as the slash command but invoked via Bash
 
 ## User philosophy — Weaver is for the 100x developer
 

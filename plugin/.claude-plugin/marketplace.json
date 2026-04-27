@@ -1,0 +1,17 @@
+{
+  "name": "weaver",
+  "owner": { "name": "chaineapp", "url": "https://github.com/chaineapp/weaver" },
+  "metadata": {
+    "description": "Weaver — Claude Code plugin for dispatching coding tasks to parallel codex/claude workers running visibly in tmux + Ghostty panes.",
+    "version": "0.4.0"
+  },
+  "plugins": [
+    {
+      "name": "weaver",
+      "description": "Adds /weaver:dispatch and /weaver:dispatch-batch slash commands. Requires `weave` CLI on PATH and a running `weave up` session.",
+      "version": "0.4.0",
+      "author": { "name": "chaineapp" },
+      "source": "./weaver"
+    }
+  ]
+}

@@ -13,6 +13,7 @@ import { runConfigGet, runConfigSet, runConfigList, configUsage } from "./comman
 import { runVersion, maybeNotifyUpdate } from "./commands/version.ts";
 import { runRestartPlanner } from "./commands/restart.ts";
 import { runDispatch } from "./commands/dispatch.ts";
+import { runDispatchBatch } from "./commands/dispatch-batch.ts";
 import { runTail } from "./commands/tail.ts";
 import { runAutoroute } from "./commands/autoroute.ts";
 
@@ -258,6 +259,41 @@ async function main() {
         process.exit(1);
       }
       await runAutoroute({ project: values.project, cwd: values.cwd, binary: values.binary });
+      return;
+    }
+
+    case "dispatch-batch": {
+      // weave dispatch-batch '<json>' [--binary X] [--bypass] [--cwd PATH]
+      // JSON: {"worker-1": "task" | {"task": "...", "binary": "codex", ...}, ...}
+      // Used by /weaver:dispatch-batch subagent so it makes only ONE Bash call.
+      let values: { binary?: string; bypass?: boolean; model?: string; cwd?: string };
+      let positionals: string[];
+      try {
+        const parsed = parseArgs({
+          args: rest,
+          options: {
+            binary: { type: "string" },
+            bypass: { type: "boolean" },
+            model: { type: "string" },
+            cwd: { type: "string" },
+          },
+          strict: true,
+          allowPositionals: true,
+        });
+        values = parsed.values as typeof values;
+        positionals = parsed.positionals;
+      } catch (err) {
+        console.error(`error: ${(err as Error).message}`);
+        console.error(`usage: weave dispatch-batch '<json>' [--binary X] [--bypass] [--cwd PATH]`);
+        process.exit(1);
+      }
+      const json = positionals[0];
+      if (!json) {
+        console.error(`usage: weave dispatch-batch '<json>' [--binary X] [--bypass] [--cwd PATH]`);
+        console.error(`example: weave dispatch-batch '{"worker-1":"task A","worker-2":"task B"}'`);
+        process.exit(1);
+      }
+      await runDispatchBatch({ json, binary: values.binary, bypass: values.bypass, model: values.model, cwd: values.cwd });
       return;
     }
 
