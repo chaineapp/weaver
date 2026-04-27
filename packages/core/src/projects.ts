@@ -68,6 +68,10 @@ export async function createProject(
   };
   await Bun.write(p.meta, JSON.stringify(record, null, 2) + "\n");
   await Bun.write(p.notes, `# ${record.name}\n\nCreated ${now}\n${opts.linearTicket ? `\nLinear: ${opts.linearTicket}\n` : ""}`);
+  // Pre-trust the project folder + every registered repo in codex's config
+  // so codex workers don't hit the "trust this folder?" interactive prompt
+  // when dispatched into them. Idempotent — won't add duplicates.
+  await trustInCodexConfig([p.base, ...Object.values(workspace.config.repos).map((r) => r.path)]);
   // Write CLAUDE.md (read by claude planner) AND AGENTS.md (read by codex
   // planner). Same orchestration brief — codex doesn't read CLAUDE.md and
   // claude doesn't read AGENTS.md, but both should learn to dispatch via
@@ -123,8 +127,14 @@ ${repoList}
 
 The Weaver plugin gives you two slash commands:
 
-* \`/weaver:dispatch-batch '<json>'\` — fan out N tasks to N worker panes in parallel, block until all done, return aggregated results. **Use this whenever you have 1+ workers.**
-* \`/weaver:dispatch worker-N "<task>"\` — single-worker form. Less common; use only if the batch wrapper feels heavy for one task.
+* \`/weaver:dispatch-batch '<json>'\` — fan out N tasks to N worker panes in parallel, block until all done, return aggregated results. **Use this whenever you have 2+ workers, OR whenever the user asks for "N workers", "all the workers", "fan out", "split", etc.**
+* \`/weaver:dispatch worker-N "<task>"\` — single-worker form. Use only when explicitly asked to dispatch to a SPECIFIC worker by name (e.g. "send this to worker-2") OR when the task is a single thing with no fan-out.
+
+**Disambiguating user requests**: "ask 4 workers what is X" means dispatch-batch with 4 workers. "ask worker-4 what is X" means dispatch (single) to slot 4. Never assume "4" alone means "worker-4" — clarify or default to dispatch-batch with N workers if numerals appear without "worker-" prefix.
+
+## Never hallucinate a worker's answer
+
+If a worker doesn't return real text (timeout, error, the tool output is "(no result captured)" or similar), say so. **Do not** synthesize an answer from your own knowledge and present it as the worker's response. The whole point of dispatching is the worker actually doing the work; if it didn't, the user needs to know so they can retry.
 
 You do NOT shell out to \`weave dispatch\` / \`weave tail\` directly. The slash command's subagent does that for you and returns clean text.
 
@@ -324,4 +334,29 @@ async function runOrThrow(args: string[]): Promise<string> {
   ]);
   if (code !== 0) throw new Error(`${args.join(" ")} failed (${code}): ${stderr.trim()}`);
   return stdout;
+}
+
+// Append codex `[projects."<path>"] trust_level = "trusted"` blocks to
+// ~/.codex/config.toml for any path not already trusted. Without this,
+// dispatched codex workers hit the interactive "Do you trust this folder?"
+// prompt when their cwd isn't a git repo (e.g. .weaver/projects/<id>/), and
+// the prompt blocks the worker indefinitely because there's no human at the
+// worker pane to answer. Idempotent — skips paths already in the config.
+async function trustInCodexConfig(paths: string[]): Promise<void> {
+  const { homedir } = await import("node:os");
+  const configPath = `${homedir()}/.codex/config.toml`;
+  let existing = "";
+  try {
+    if (await Bun.file(configPath).exists()) existing = await Bun.file(configPath).text();
+  } catch { /* config doesn't exist yet — fine, we'll create */ }
+  const additions: string[] = [];
+  for (const path of paths) {
+    if (!path) continue;
+    // Match the codex TOML form: [projects."/abs/path"]
+    if (existing.includes(`[projects."${path}"]`)) continue;
+    additions.push(`\n[projects."${path}"]\ntrust_level = "trusted"`);
+  }
+  if (additions.length === 0) return;
+  const next = (existing.endsWith("\n") || existing === "") ? existing : existing + "\n";
+  await Bun.write(configPath, next + additions.join("\n") + "\n");
 }
